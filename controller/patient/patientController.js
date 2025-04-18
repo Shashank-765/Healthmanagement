@@ -122,32 +122,41 @@ module.exports = {
     // New endpoint to get sensitive data
     getPatientSensitiveData: async (req, res) => {
         try {
-            const patientId = req.params.id;
-            const patient = await patientSignup.findById(patientId);
+            console.log("Controller: Starting to fetch sensitive data...");
+            const { cid } = req.params;
 
-            if (!patient) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Patient not found"
+            if (!cid) {
+                console.log("Controller: CID is missing");
+                return res.status(400).json({
+                    statusCode: 400,
+                    message: "CID is required"
                 });
             }
 
-            // Use IPFSService's retrieveAndDecrypt method
-            const decryptedData = await IPFSService.retrieveAndDecrypt(
-                patient.ipfsCID,
-                patient.ipfsIV
-            );
-            console.log('Decrypted data:', decryptedData);
+            console.log("Controller: Calling service to fetch data by CID:", cid);
+            const { patient, sensitiveData } = await patientSensitiveDataService.getSensitiveDataByCID(cid);
+            console.log("Controller: Data fetched successfully");
 
             res.status(200).json({
-                success: true,
-                data: decryptedData
+                statusCode: 200,
+                message: "Sensitive data retrieved successfully",
+                data: {
+                    patient: {
+                        _id: patient._id,
+                        fullName: patient.fullName,
+                        email: patient.email
+                    },
+                    sensitiveData: sensitiveData
+                }
             });
+            console.log("Controller: Response sent successfully");
+
         } catch (error) {
-            console.error("Error retrieving sensitive data:", error);
-            res.status(500).json({
-                success: false,
-                message: error.message || "Internal server error"
+            console.error('Controller: Error fetching sensitive data:', error);
+            const statusCode = error.message.includes("not found") ? 404 : 500;
+            res.status(statusCode).json({
+                statusCode,
+                message: error.message || "Failed to retrieve sensitive data"
             });
         }
     }

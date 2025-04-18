@@ -4,22 +4,29 @@ const IPFSService = require('./ipfsService');
 module.exports = {
     getSensitiveDataByCID: async (cid) => {
         try {
-            // Validation 1: Check if patient exists
-            const patient = await patientSignup.findOne({ ipfsCID: cid });
-            if (!patient) {
+               const patient = await patientSignup.findOne({ ipfsCID: cid });
+               if (!patient) {
                 throw new Error("Patient not found");
             }
 
-            // Get data from IPFS
+            if (!patient.ipfsCID || !patient.ipfsIV) {
+                console.log("Service: Missing IPFS data for patient:", {
+                    hasCID: !!patient.ipfsCID,
+                    hasIV: !!patient.ipfsIV
+                });
+                throw new Error("Patient IPFS data is incomplete");
+            }
             const sensitiveData = await IPFSService.retrieveAndDecrypt(
                 patient.ipfsCID,
                 patient.ipfsIV
             );
-
-            // Response: Return data
+            if (!sensitiveData) {
+                throw new Error("Failed to retrieve sensitive data from IPFS");
+            }
             return { patient, sensitiveData };
 
         } catch (error) {
+            console.error("Service: Error in getSensitiveDataByCID:", error);
             throw error;
         }
     }
