@@ -1,10 +1,11 @@
 const express = require('express');
-const { patientSignupService, patientLoginService } = require('../../services/services');
+const { patientSignupService, patientLoginService } = require('../../services/patientservices');
 const upload = require('../../utils/multer');
 const patientLogin = require('../../models/patient/loginModel');
 const IPFSService = require('../../services/ipfsService');
 const patientSignup = require('../../models/patient/signupModel');
 const encryptionService = require('../../utils/encryptdecrypt');
+const patientSensitiveDataService = require('../../services/patientSensitiveDataService');
 
 module.exports = {
     patientSignup: async (req, res) => {
@@ -69,7 +70,7 @@ module.exports = {
 
             // Handle other errors
             const statusCode = error.message.includes("required") || 
-                             error.message.includes("exists") ? 400 : 500;
+               error.message.includes("exists") ? 400 : 500;
             
             return res.status(statusCode).json({
                 success: false,
@@ -80,35 +81,36 @@ module.exports = {
 
     patientLogin: async (req, res) => {
         try {
+            console.log("Controller: Starting login process...");
             const { email, password } = req.body;
 
-            // Validate login credentials
-            const patient = await patientLoginService.validateLogin(email, password);
-
-            // If login successful, create login record if it doesn't exist
-            const existingLogin = await patientLogin.findOne({ email });
-            if (!existingLogin) {
-                await patientLogin.create({
-                    email: patient.email,
-                    password: patient.password
+            if (!email || !password) {
+                console.log("Controller: Missing email or password");
+                return res.status(400).json({
+                    statusCode: 400,
+                    message: "Email and password are required"
                 });
             }
 
-            // Generate token only during login
-            const token = patientLoginService.generateToken(patient._id);
+            console.log("Controller: Calling validateLogin service...");
+            const { patient, loginData, token } = await patientLoginService.validateLogin(email, password);
+            console.log("Controller: Login validation successful");
 
-            // Send success response
+            console.log("Controller: Sending response...");
             res.status(200).json({
                 statusCode: 200,
                 message: "Patient login successful",
                 data: {
+                    _id: patient._id,
                     email: patient.email,
-                    password: patient.password,
+                    fullName: patient.fullName,
+                    hashedPassword: loginData.password,
                     token
                 }
             });
 
         } catch (error) {
+            console.error('Controller: Login error:', error);
             const statusCode = error.message.includes("Invalid") ? 401 : 500;
             res.status(statusCode).json({
                 statusCode,

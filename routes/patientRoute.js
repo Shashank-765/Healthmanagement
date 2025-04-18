@@ -29,8 +29,15 @@ router.post("/signup",
 );
 
 router.post('/patientlogin', patientController.patientLogin);
-
 // Route to get sensitive data
-router.get('/:id/sensitive-data', patientController.getPatientSensitiveData);
+router.get('/:cid/sensitive-data', patientController.getPatientSensitiveData);
+
+// Protected routes for sensitive data
+// router.get('/:cid/sensitive-data', 
+//     authMiddleware.authenticateToken,  // JWT token check
+//     authMiddleware.authorizePatientAccess, // Check if user has access to this patient's data
+//     patientController.getPatientSensitiveData
+// );
+
 
 module.exports = router;
