@@ -6,4 +6,5 @@ const upload = require('../utils/multer');
 
 router.post("/doctorsignup", upload.single('medicalDocument'), doctorController.doctorSignup);
 router.post("/doctorlogin", doctorController.doctorLogin);
+router.post("/adddoctor",doctorController.createDoctor);
 module.exports = router;

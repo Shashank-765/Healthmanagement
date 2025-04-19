@@ -2,7 +2,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const doctorSignup = require('../../models/doctor/signupModel');
 const doctorLogin = require('../../models/doctor/loginModel');
-const { doctorSignupService, doctorLoginService } = require('../../services/doctorservice');
+const adddoctorModel = require('../../models/doctor/adddoctorModel');
+const { doctorSignupService, doctorLoginService, createdDoctor } = require('../../services/doctorservice');
 const fs = require('fs');
 
 module.exports = {
@@ -111,6 +112,34 @@ module.exports = {
                 message: error.message || "Internal server error"
             });
         }
+    },
+    createDoctor: async (req, res) => {
+        try {
+            const doctorData = req.body;
+            
+            // Validate and process data using service
+            const validatedData = await createdDoctor.validateDoctorData(doctorData);
+            const newDoctor = await createdDoctor.saveDoctor(validatedData);
+
+            return res.status(201).json({
+                success: true,
+                message: "Doctor created successfully",
+                data: newDoctor
+            });
+        } catch (error) {
+            console.log("Error in createDoctor:", error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
     }
+
 };
+
+
+// add :- fullname,specialization,experience,avaiability,contactnumber,email,password,qualification,address,bio,profileimage
+// read on :- what to show, profileimage, fullname, specialization, experience, avaiability, contactnumber, email
+//schedule appointment:- profileimage, fullname(doctor), specialization, prefered date and perfered time, full name (patient),phonenumber(patient),email address and reason for visit both patient.
+//doctor view profile:- profileimage, fullname,specalization,experience,avaiability,contactnumber,email,rating,patientsin numbers. and about(bio).
 

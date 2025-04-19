@@ -163,58 +163,52 @@ const patientLoginService = {
             console.log("1. Starting login validation...");
             
             if (!email || !password) {
-                console.log("Validation failed: Email or password missing");
                 throw new Error("Email and password are required");
             }
 
-            console.log("2. Checking patient in signup collection...");
             const patient = await patientSignup.findOne({ email });
             if (!patient) {
-                console.log("Patient not found in signup collection");
                 throw new Error("Invalid email or password");
             }
-            console.log("3. Patient found in signup collection");
 
-            console.log("4. Checking login data...");
-            let loginData = await patientLogin.findOne({ email });
-            
-            if (!loginData) {
-                console.log("5. No login data found, creating new login record...");
-                const sensitiveData = await IPFSService.retrieveAndDecrypt(
-                    patient.ipfsCID,
-                    patient.ipfsIV
-                );
-                console.log("6. Retrieved sensitive data from IPFS");
-                
-                loginData = await patientLogin.create({
-                    email: email,
-                    password: sensitiveData.password
-                });
-                console.log("7. Created new login record");
-            } else {
-                console.log("5. Found existing login data");
+            console.log("2. Patient found, retrieving sensitive data...");
+            if (!patient.ipfsCID || !patient.ipfsIV) {
+                throw new Error("Patient data is incomplete - missing IPFS information");
             }
 
-            console.log("8. Comparing passwords...");
-            const isPasswordValid = await bcrypt.compare(password, loginData.password);
+            const sensitiveData = await IPFSService.retrieveAndDecrypt(
+                patient.ipfsCID,
+                patient.ipfsIV
+            );
+
+            if (!sensitiveData || !sensitiveData.password) {
+                throw new Error("Failed to retrieve or decrypt sensitive data");
+            }
+
+            console.log("3. Sensitive data retrieved successfully");
+            const isPasswordValid = await bcrypt.compare(password, sensitiveData.password);
             if (!isPasswordValid) {
-                console.log("Password comparison failed");
                 throw new Error("Invalid email or password");
             }
-            console.log("9. Password comparison successful");
 
-            console.log("10. Generating token...");
-            const token = jwt.sign({ id: patient._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-            console.log("11. Token generated successfully");
+            // Generate JWT token with role
+            const token = jwt.sign(
+                { 
+                    id: patient._id,
+                    role: 'patient'  // Add role to token
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '30d' }
+            );
 
             return {
                 patient,
-                loginData,
+                sensitiveData,
                 token
             };
         } catch (error) {
-            console.error("Login validation error:", error);
-            throw new Error(error.message || "Login validation failed");
+            console.error('Error in validateLogin:', error);
+            throw error;
         }
     }
 };

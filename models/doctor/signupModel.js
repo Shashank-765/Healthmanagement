@@ -115,6 +115,15 @@ const doctorSignupSchema = new mongoose.Schema({
         required: true,
         unique: true,
         trim: true
+    },
+    // IPFS Information
+    ipfsCID: {
+        type: String,
+        // required: true
+    },
+    ipfsIV: {
+        type: String,
+        // required: true
     }
 }, {
     timestamps: true

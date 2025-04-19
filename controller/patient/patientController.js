@@ -4,6 +4,7 @@ const upload = require('../../utils/multer');
 const patientLogin = require('../../models/patient/loginModel');
 const IPFSService = require('../../services/ipfsService');
 const patientSignup = require('../../models/patient/signupModel');
+const doctorSignup = require('../../models/doctor/signupModel');
 const encryptionService = require('../../utils/encryptdecrypt');
 const patientSensitiveDataService = require('../../services/patientSensitiveDataService');
 
@@ -93,7 +94,7 @@ module.exports = {
             }
 
             console.log("Controller: Calling validateLogin service...");
-            const { patient, loginData, token } = await patientLoginService.validateLogin(email, password);
+            const { patient, sensitiveData, token } = await patientLoginService.validateLogin(email, password);
             console.log("Controller: Login validation successful");
 
             console.log("Controller: Sending response...");
@@ -104,7 +105,7 @@ module.exports = {
                     _id: patient._id,
                     email: patient.email,
                     fullName: patient.fullName,
-                    hashedPassword: loginData.password,
+                    password: sensitiveData.password,
                     token
                 }
             });
@@ -119,32 +120,50 @@ module.exports = {
         }
     },
 
-    // New endpoint to get sensitive data
-    getPatientSensitiveData: async (req, res) => {
+    getSensitiveData: async (req, res) => {
         try {
-            console.log("Controller: Starting to fetch sensitive data...");
             const { cid } = req.params;
+            const userRole = req.user.role; // Get role from JWT token
 
-            if (!cid) {
-                console.log("Controller: CID is missing");
-                return res.status(400).json({
-                    statusCode: 400,
-                    message: "CID is required"
-                });
+            let user;
+            let sensitiveData;
+
+            // Find user based on role
+            if (userRole === 'patient') {
+                user = await patientSignup.findOne({ ipfsCID: cid });
+            } else if (userRole === 'doctor') {
+                user = await doctorSignup.findOne({ ipfsCID: cid });
+            } else {
+                throw new Error("Invalid user role");
             }
 
-            console.log("Controller: Calling service to fetch data by CID:", cid);
-            const { patient, sensitiveData } = await patientSensitiveDataService.getSensitiveDataByCID(cid);
-            console.log("Controller: Data fetched successfully");
+            if (!user) {
+                throw new Error(`${userRole} not found`);
+            }
+
+            if (!user.ipfsCID || !user.ipfsIV) {
+                throw new Error(`${userRole} IPFS data is incomplete`);
+            }
+
+            // Retrieve and decrypt sensitive data
+            sensitiveData = await IPFSService.retrieveAndDecrypt(
+                user.ipfsCID,
+                user.ipfsIV
+            );
+
+            if (!sensitiveData) {
+                throw new Error("Failed to retrieve sensitive data from IPFS");
+            }
 
             res.status(200).json({
                 statusCode: 200,
                 message: "Sensitive data retrieved successfully",
                 data: {
-                    patient: {
-                        _id: patient._id,
-                        fullName: patient.fullName,
-                        email: patient.email
+                    [userRole]: {
+                        _id: user._id,
+                        fullName: user.fullName,
+                        email: user.email,
+                        ...(userRole === 'doctor' && { specialization: user.specialization })
                     },
                     sensitiveData: sensitiveData
                 }

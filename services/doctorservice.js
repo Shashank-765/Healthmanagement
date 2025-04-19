@@ -5,7 +5,9 @@ const doctorSignup = require('../models/doctor/signupModel');
 const patientSignup = require('../models/patient/signupModel');
 const doctorController = require('../controller/doctor/doctorController');
 const doctorLogin = require('../models/doctor/loginModel');
+const IPFSService = require('./ipfsService');
 const mnemonic = process.env.mnemonic;
+const adddoctorModel = require('../models/doctor/adddoctorModel');
 
 const doctorSignupService = {
     generateWallet: async () => {
@@ -54,7 +56,8 @@ const doctorSignupService = {
             'Password': password,
             'Specialization': specialization,
             'Medical License Number': medicalLicenseNumber,
-            'Years of Experience': yearsOfExperience
+            'Years of Experience': yearsOfExperience,
+            'Medical Document': medicalDocument
         };
 
         const missingFields = Object.entries(requiredFields)
@@ -96,6 +99,12 @@ const doctorSignupService = {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // Generate IPFS data
+        const ipfsData = await IPFSService.uploadEncryptedData({
+            password: hashedPassword,
+            medicalDocument: medicalDocument
+        });
+
         // Return complete validated data
         return {
             fullName,
@@ -109,7 +118,9 @@ const doctorSignupService = {
             yearsOfExperience,
             hospitalClinicName: hospitalClinicName || null,
             medicalDocument,
-            walletAddress
+            walletAddress,
+            ipfsCID: ipfsData.cid,
+            ipfsIV: ipfsData.iv
         };
     }
 };
@@ -156,7 +167,49 @@ const doctorLoginService = {
     }
 };
 
+const createdDoctor = {
+    validateDoctorData: async (doctorData) => {
+        try {
+            // Check if all required fields are present
+            const requiredFields = ['fullName', 'specialization', 'experience', 'availability', 
+                                 'contactnumber', 'email', 'password', 'qualification', 
+                                 'address', 'bio'];
+            
+            const missingFields = requiredFields.filter(field => !doctorData[field]);
+            if (missingFields.length > 0) {
+                throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+            }
+
+            // Check if email already exists
+            const existEmail = await adddoctorModel.findOne({ email: doctorData.email });
+            if (existEmail) {
+                throw new Error("Email already exists");
+            }
+
+            // Hash password
+            const hashPassword = await bcrypt.hash(doctorData.password, 10);
+
+            // Return validated and processed data
+            return {
+                ...doctorData,
+                password: hashPassword
+            };
+        } catch (error) {
+            throw error;
+        }
+    },
+    saveDoctor: async (validatedDoctorData) => {
+        try {
+            const doctorData = new adddoctorModel(validatedDoctorData);
+            return await doctorData.save();
+        } catch (error) {
+            throw error;
+        }
+    }
+};
+
 module.exports = {
     doctorSignupService,
-    doctorLoginService
+    doctorLoginService,
+    createdDoctor
 };
