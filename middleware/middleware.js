@@ -22,9 +22,19 @@ const authMiddleware = {
             }
 
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            console.log("Decoded token:", decoded);
+            if (!decoded.role) {
+                console.error("Token missing role:", decoded);
+                return res.status(401).json({
+                    statusCode: 401,
+                    success: false,
+                    message: "Token missing role"
+                });
+            }
             req.user = decoded;
             next();
         } catch (error) {
+            console.error("Token verification error:", error);
             return res.status(401).json({
                 statusCode: 401,
                 success: false,

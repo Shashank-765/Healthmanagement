@@ -123,37 +123,9 @@ module.exports = {
     getSensitiveData: async (req, res) => {
         try {
             const { cid } = req.params;
-            const userRole = req.user.role; // Get role from JWT token
-
-            let user;
-            let sensitiveData;
-
-            // Find user based on role
-            if (userRole === 'patient') {
-                user = await patientSignup.findOne({ ipfsCID: cid });
-            } else if (userRole === 'doctor') {
-                user = await doctorSignup.findOne({ ipfsCID: cid });
-            } else {
-                throw new Error("Invalid user role");
-            }
-
-            if (!user) {
-                throw new Error(`${userRole} not found`);
-            }
-
-            if (!user.ipfsCID || !user.ipfsIV) {
-                throw new Error(`${userRole} IPFS data is incomplete`);
-            }
-
-            // Retrieve and decrypt sensitive data
-            sensitiveData = await IPFSService.retrieveAndDecrypt(
-                user.ipfsCID,
-                user.ipfsIV
-            );
-
-            if (!sensitiveData) {
-                throw new Error("Failed to retrieve sensitive data from IPFS");
-            }
+            
+            // Use the service to get sensitive data
+            const { user, sensitiveData, userRole } = await patientSensitiveDataService.getSensitiveDataByCID(cid, req);
 
             res.status(200).json({
                 statusCode: 200,

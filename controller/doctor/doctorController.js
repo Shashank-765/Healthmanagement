@@ -5,6 +5,7 @@ const doctorLogin = require('../../models/doctor/loginModel');
 const adddoctorModel = require('../../models/doctor/adddoctorModel');
 const { doctorSignupService, doctorLoginService, createdDoctor } = require('../../services/doctorservice');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
 module.exports = {
     doctorSignup: async (req, res) => {
@@ -32,8 +33,8 @@ module.exports = {
             // Validate and process doctor data
             const validatedData = await doctorSignupService.validateDoctorData(req.body);
             
-            // Create doctor in signup collection
-            const doctor = await doctorSignup.create(validatedData);
+            // Create doctor with sensitive data in IPFS
+            const doctor = await doctorSignupService.createDoctor(validatedData);
 
             // Prepare response data
             const doctorResponse = doctor.toObject();
@@ -91,8 +92,15 @@ module.exports = {
                 });
             }
 
-            // Generate token only during login
-            const token = doctorLoginService.generateToken(doctor._id);
+            // Generate token with role
+            const token = jwt.sign(
+                { 
+                    id: doctor._id,
+                    role: 'doctor'
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '30d' }
+            );
 
             // Send success response
             res.status(200).json({
@@ -106,6 +114,7 @@ module.exports = {
             });
 
         } catch (error) {
+            console.error('Doctor login error:', error);
             const statusCode = error.message.includes("Invalid") ? 401 : 500;
             res.status(statusCode).json({
                 statusCode,

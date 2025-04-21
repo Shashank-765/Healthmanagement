@@ -27,101 +27,119 @@ const doctorSignupService = {
             throw new Error("Wallet creation failed: " + error.message);
         }
     },
+
     validateDoctorData: async (doctorData) => {
-        if (!doctorData) {
-            throw new Error("Please provide doctor data");
-        }
+        try {
+            if (!doctorData) {
+                throw new Error("Doctor data is required");
+            }
 
-        const {
-            fullName,
-            gender,
-            dateOfBirth,
-            contactNumber,
-            email,
-            password,
-            specialization,
-            medicalLicenseNumber,
-            yearsOfExperience,
-            hospitalClinicName,
-            medicalDocument
-        } = doctorData;
+            // Check if email exists
+            const existingDoctor = await doctorSignup.findOne({ email: doctorData.email });
+            if (existingDoctor) {
+                throw new Error("Email already exists");
+            }
 
-        // Required fields validation
-        const requiredFields = {
-            'Full Name': fullName,
-            'Gender': gender,
-            'Date of Birth': dateOfBirth,
-            'Contact Number': contactNumber,
-            'Email': email,
-            'Password': password,
-            'Specialization': specialization,
-            'Medical License Number': medicalLicenseNumber,
-            'Years of Experience': yearsOfExperience,
-            'Medical Document': medicalDocument
-        };
+            // Validate required fields
+            const requiredFields = [
+                'fullName', 'gender', 'dateOfBirth', 'email', 'password',
+                'contactNumber', 'specialization', 'medicalLicenseNumber',
+                'yearsOfExperience', 'hospitalClinicName', 'medicalDocument'
+            ];
 
-        const missingFields = Object.entries(requiredFields)
-            .filter(([_, value]) => !value)
-            .map(([key]) => key);
+            const missingFields = requiredFields.filter(field => !doctorData[field]);
+            if (missingFields.length > 0) {
+                throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+            }
 
-        if (missingFields.length > 0) {
-            throw new Error(`Please fill mandatory fields: ${missingFields.join(", ")}`);
-        }
-        
-        // Validate contact number
-        if (!/^\d{10}$/.test(contactNumber)) {
-            throw new Error("Contact number must be a valid 10-digit number");
-        }
-        
-        // Validate email format
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            throw new Error("Please provide a valid email address");
-        }
-        
-        // Validate medical license number
-        if (!/^\d{10}$/.test(medicalLicenseNumber)) {
-            throw new Error("Medical license number must be a valid 10-digit number");
-        }
-        
-        // Check if email exists
-        const emailExists = await doctorSignup.findOne({ email });
-        if (emailExists) {
-            throw new Error("Email already exists");
-        }
-        
-        // Generate wallet if not provided
-        let walletAddress = doctorData.walletAddress;
-        if (!walletAddress) {
+            // Validate email format
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(doctorData.email)) {
+                throw new Error("Please enter a valid email address");
+            }
+
+            // Validate contact number format
+            if (!/^\d{10}$/.test(doctorData.contactNumber)) {
+                throw new Error("Contact number must be exactly 10 digits");
+            }
+
+            // Validate medical license number format
+            if (!/^\d{10}$/.test(doctorData.medicalLicenseNumber)) {
+                throw new Error("Medical license number must be exactly 10 digits");
+            }
+
+            // Generate wallet
             const walletData = await doctorSignupService.generateWallet();
-            walletAddress = walletData.address;
+            
+            // Hash password
+            const hashedPassword = await bcrypt.hash(doctorData.password, 10);
+
+            return {
+                ...doctorData,
+                password: hashedPassword,
+                walletAddress: walletData.address
+            };
+        } catch (error) {
+            console.error('Error in validateDoctorData:', error);
+            throw error;
         }
-        
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
+    },
 
-        // Generate IPFS data
-        const ipfsData = await IPFSService.uploadEncryptedData({
-            password: hashedPassword,
-            medicalDocument: medicalDocument
-        });
+    createDoctor: async (validatedData) => {
+        try {
+            // Create MongoDB document with all required fields
+            const mongoData = {
+                fullName: validatedData.fullName,
+                gender: validatedData.gender,
+                dateOfBirth: validatedData.dateOfBirth,
+                contactNumber: validatedData.contactNumber,
+                email: validatedData.email,
+                password: validatedData.password,
+                specialization: validatedData.specialization,
+                medicalLicenseNumber: validatedData.medicalLicenseNumber,
+                yearsOfExperience: validatedData.yearsOfExperience,
+                hospitalClinicName: validatedData.hospitalClinicName,
+                medicalDocument: validatedData.medicalDocument,
+                walletAddress: validatedData.walletAddress
+            };
 
-        // Return complete validated data
-        return {
-            fullName,
-            gender,
-            dateOfBirth,
-            contactNumber,
-            email,
-            password: hashedPassword,
-            specialization,
-            medicalLicenseNumber,
-            yearsOfExperience,
-            hospitalClinicName: hospitalClinicName || null,
-            medicalDocument,
-            walletAddress,
-            ipfsCID: ipfsData.cid,
-            ipfsIV: ipfsData.iv
-        };
+            // Create doctor in MongoDB
+            const doctor = await doctorSignup.create(mongoData);
+
+            // Prepare sensitive data for IPFS
+            const sensitiveData = {
+                password: validatedData.password,
+                walletAddress: validatedData.walletAddress,
+                contactNumber: validatedData.contactNumber,
+                medicalLicenseNumber: validatedData.medicalLicenseNumber,
+                medicalDocument: validatedData.medicalDocument,
+                gender: validatedData.gender,
+                dateOfBirth: validatedData.dateOfBirth,
+                specialization: validatedData.specialization,
+                yearsOfExperience: validatedData.yearsOfExperience,
+                hospitalClinicName: validatedData.hospitalClinicName
+            };
+
+            // Upload sensitive data to IPFS
+            const ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
+
+            // Update doctor with IPFS data
+            await doctorSignup.findByIdAndUpdate(doctor._id, {
+                ipfsCID: ipfsResult.cid,
+                ipfsIV: ipfsResult.iv
+            });
+
+            // Return the complete doctor document
+            const updatedDoctor = await doctorSignup.findById(doctor._id);
+            if (!updatedDoctor) {
+                throw new Error("Failed to create doctor record");
+            }
+
+            return updatedDoctor;
+        } catch (error) {
+            console.error('Error in createDoctor:', error);
+            throw error;
+        }
     }
 };
 
@@ -150,12 +168,14 @@ const doctorLoginService = {
         }
     },
     generateToken: (doctorId) => {
-        try {
-            const token = jwt.sign({ id: doctorId }, process.env.JWT_SECRET, { expiresIn: "30d" });
-            return token;
-        } catch (error) {
-            throw new Error("Token generation failed: " + error.message);
-        }
+        return jwt.sign(
+            { 
+                id: doctorId,
+                role: 'doctor'  // Add role to token
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '30d' }
+        );
     },
     createDoctorLogin: async (doctorLoginData) => {
         try {
