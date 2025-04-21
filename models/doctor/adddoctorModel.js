@@ -57,10 +57,18 @@ const adddoctorSchema = new mongoose.Schema({
         type:String,
         required:true
     },  
-    // profileimage:{
-    //     type:String,
-    //     // required:true
-    // }
+    profileimage:{
+        type:String,
+        // required:true
+    },
+    ipfsCID: {
+        type: String,
+        trim: true
+    },
+    ipfsIV: {
+        type: String,
+        trim: true
+    }
 },{timestamps:true});
 
 const adddoctor = mongoose.model("adddoctor",adddoctorSchema);
