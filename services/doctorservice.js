@@ -190,62 +190,62 @@ const doctorLoginService = {
 const createdDoctor = {
     validateDoctorData: async (doctorData) => {
         try {
-            // Check if all required fields are present
-            const requiredFields = ['fullName', 'specialization', 'experience', 'availability', 
-                                 'contactnumber', 'email', 'password', 'qualification', 
-                                 'address', 'bio'];
+            // First check if doctor exists in doctorSignup collection
+            const signedUpDoctor = await doctorSignup.findOne({ email: doctorData.email });
+            if (!signedUpDoctor) {
+                throw new Error("Doctor must be signed up first");
+            }
+
+            // Check additional required fields
+            const additionalFields = [
+                'specialization', 'availability', 
+                'qualification', 'address', 'bio'
+            ];
             
-            const missingFields = requiredFields.filter(field => !doctorData[field]);
+            const missingFields = additionalFields.filter(field => !doctorData[field]);
             if (missingFields.length > 0) {
                 throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
             }
 
-            // Check if email already exists
+            // Check if already added to adddoctorModel
             const existEmail = await adddoctorModel.findOne({ email: doctorData.email });
             if (existEmail) {
-                throw new Error("Email already exists");
+                throw new Error("Doctor profile already exists");
             }
 
-            // Check if contact number already exists
-            const existContact = await adddoctorModel.findOne({ contactnumber: doctorData.contactnumber });
-            if (existContact) {
-                throw new Error("Contact number already exists");
-            }
-
-            // Validate email format
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(doctorData.email)) {
-                throw new Error("Please enter a valid email address");
-            }
-
-            // Validate contact number format
-            if (!/^\d{10}$/.test(doctorData.contactnumber)) {
-                throw new Error("Contact number must be exactly 10 digits");
-            }
-
-            // Hash password
-            const hashPassword = await bcrypt.hash(doctorData.password, 10);
-
-            // Return validated and processed data
+            // Combine signup data with new data
             return {
-                ...doctorData,
-                password: hashPassword
+                fullName: signedUpDoctor.fullName,
+                email: signedUpDoctor.email,
+                password: signedUpDoctor.password,
+                specialization: doctorData.specialization,
+                experience: doctorData.experience || 0,
+                availability: doctorData.availability,
+                contactnumber: doctorData.contactnumber || signedUpDoctor.contactNumber,
+                qualification: doctorData.qualification,
+                address: doctorData.address,
+                bio: doctorData.bio,
+                profileimage: doctorData.profileimage || null
             };
         } catch (error) {
             throw error;
         }
     },
+
     saveDoctor: async (validatedDoctorData) => {
         try {
-            // Create MongoDB document with basic information
+            // Get original signup data
+            const signupData = await doctorSignup.findOne({ email: validatedDoctorData.email });
+            
+            // Create MongoDB document combining signup and new data
             const mongoData = {
                 fullName: validatedDoctorData.fullName,
+                email: validatedDoctorData.email,
+                password: validatedDoctorData.password,
                 specialization: validatedDoctorData.specialization,
                 experience: validatedDoctorData.experience,
                 availability: validatedDoctorData.availability,
                 contactnumber: validatedDoctorData.contactnumber,
-                email: validatedDoctorData.email,
-                password: validatedDoctorData.password,
                 qualification: validatedDoctorData.qualification,
                 address: validatedDoctorData.address,
                 bio: validatedDoctorData.bio,
@@ -255,19 +255,36 @@ const createdDoctor = {
             // Create doctor in MongoDB
             const doctor = await adddoctorModel.create(mongoData);
 
-            // Prepare sensitive data for IPFS
-            const sensitiveData = {
+            // Store ALL fields in IPFS
+            const allData = {
+                // Basic info
+                fullName: validatedDoctorData.fullName,
+                email: validatedDoctorData.email,
                 password: validatedDoctorData.password,
+                
+                // Additional info
+                specialization: validatedDoctorData.specialization,
+                experience: validatedDoctorData.experience,
+                availability: validatedDoctorData.availability,
                 contactnumber: validatedDoctorData.contactnumber,
-                profileimage: validatedDoctorData.profileimage,
                 qualification: validatedDoctorData.qualification,
                 address: validatedDoctorData.address,
-                bio: validatedDoctorData.bio
+                bio: validatedDoctorData.bio,
+                profileimage: validatedDoctorData.profileimage,
+                
+                // Original signup data
+                medicalLicenseNumber: signupData.medicalLicenseNumber,
+                medicalDocument: signupData.medicalDocument,
+                walletAddress: signupData.walletAddress,
+                gender: signupData.gender,
+                dateOfBirth: signupData.dateOfBirth,
+                age: signupData.age,
+                hospitalClinicName: signupData.hospitalClinicName
             };
 
-            // Upload sensitive data to IPFS
-            const ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
-            console.log("IPFS Result:", ipfsResult); // Add logging
+            // Upload all data to IPFS
+            const ipfsResult = await IPFSService.uploadEncryptedData(allData);
+            console.log("IPFS Result:", ipfsResult);
 
             // Update doctor with IPFS data
             const updatedDoctor = await adddoctorModel.findByIdAndUpdate(
@@ -276,14 +293,14 @@ const createdDoctor = {
                     ipfsCID: ipfsResult.cid,
                     ipfsIV: ipfsResult.iv
                 },
-                { new: true } // Return the updated document
+                { new: true }
             );
 
             if (!updatedDoctor) {
                 throw new Error("Failed to create doctor record");
             }
 
-            console.log("Updated Doctor with IPFS:", updatedDoctor); // Add logging
+            console.log("Updated Doctor with IPFS:", updatedDoctor);
             return updatedDoctor;
         } catch (error) {
             console.error('Error in saveDoctor:', error);

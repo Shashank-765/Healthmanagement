@@ -1,5 +1,5 @@
 const express = require('express');
-const { patientSignupService, patientLoginService } = require('../../services/patientservices');
+const { patientSignupService, patientLoginService, addpatientService, readpatientdataByName, readAllpatientdata, updatePatientService } = require('../../services/patientservices');
 const upload = require('../../utils/multer');
 const patientLogin = require('../../models/patient/loginModel');
 const IPFSService = require('../../services/ipfsService');
@@ -7,6 +7,7 @@ const patientSignup = require('../../models/patient/signupModel');
 const doctorSignup = require('../../models/doctor/signupModel');
 const encryptionService = require('../../utils/encryptdecrypt');
 const patientSensitiveDataService = require('../../services/patientSensitiveDataService');
+const addpatientModel = require('../../models/patient/addpatientModel');
 
 module.exports = {
     patientSignup: async (req, res) => {
@@ -70,9 +71,9 @@ module.exports = {
             }
 
             // Handle other errors
-            const statusCode = error.message.includes("required") || 
-               error.message.includes("exists") ? 400 : 500;
-            
+            const statusCode = error.message.includes("required") ||
+                error.message.includes("exists") ? 400 : 500;
+
             return res.status(statusCode).json({
                 success: false,
                 message: error.message || "Internal server error"
@@ -97,6 +98,23 @@ module.exports = {
             const { patient, sensitiveData, token } = await patientLoginService.validateLogin(email, password);
             console.log("Controller: Login validation successful");
 
+            // Save login data with token
+            const loginData = {
+                email: patient.email,
+                password: sensitiveData.password,
+                token: token,
+                lastLogin: new Date()
+            };
+
+            // Save or update login record with token
+            const savedLogin = await patientLogin.findOneAndUpdate(
+                { email: patient.email },
+                loginData,
+                { upsert: true, new: true }
+            );
+
+            console.log("Controller: Login data saved successfully");
+
             console.log("Controller: Sending response...");
             res.status(200).json({
                 statusCode: 200,
@@ -104,9 +122,7 @@ module.exports = {
                 data: {
                     _id: patient._id,
                     email: patient.email,
-                    fullName: patient.fullName,
-                    password: sensitiveData.password,
-                    token
+                    token: savedLogin.token // Use the saved token
                 }
             });
 
@@ -119,11 +135,11 @@ module.exports = {
             });
         }
     },
-
+    //after signup
     getSensitiveData: async (req, res) => {
         try {
             const { cid } = req.params;
-            
+
             // Use the service to get sensitive data
             const { user, sensitiveData, userRole } = await patientSensitiveDataService.getSensitiveDataByCID(cid, req);
 
@@ -148,6 +164,238 @@ module.exports = {
             res.status(statusCode).json({
                 statusCode,
                 message: error.message || "Failed to retrieve sensitive data"
+            });
+        }
+    },
+
+    addPatient: async (req, res) => {
+        try {
+            // Create patient data object
+            const patientData = {
+                fullName: req.body.fullName,
+                email: req.body.email,
+                medicalCondition: req.body.medicalCondition,
+                admitDate: req.body.admitDate,
+                medicalDocument: req.body.medicalDocument,
+                roomNumber: req.body.roomNumber,
+                assignedDoctor: req.body.assignedDoctor,
+                medicalHistory: req.body.medicalHistory,
+                insuranceInformation: req.body.insuranceInformation,
+                // profileimage: req.file.path // Use the uploaded file path
+            };
+
+            // Validate and create patient
+            const validatedData = await addpatientService.validatePatientData(patientData);
+            const patient = await addpatientService.savePatient(validatedData);
+
+            // Send success response
+            return res.status(201).json({
+                success: true,
+                message: "Patient added successfully",
+                data: {
+                    _id: patient._id,
+                    fullName: patient.fullName,
+                    age: patient.age,
+                    gender: patient.gender,
+                    bloodGroup: patient.bloodGroup,
+                    admitDate: patient.admitDate,
+                    email: patient.email,
+                    // dateOfBirth: patient.dateOfBirth,
+                    roomNumber: patient.roomNumber,
+                    contactNumber: patient.contactNumber,
+                    medicalCondition: patient.medicalCondition,
+                    ipfsCID: patient.ipfsCID,
+                    ipfsIV: patient.ipfsIV,
+                    createdAt: patient.createdAt,
+                    updatedAt: patient.updatedAt
+                }
+            });
+
+        } catch (error) {
+            console.error("\n=== ERROR IN ADD PATIENT ===", error.message);
+            console.error("Error details:", {
+                message: error.message,
+                stack: error.stack
+            });
+
+            // Handle validation errors
+            if (error.message.includes("Validation failed")) {
+                return res.status(400).json({
+                    success: false,
+                    message: error.message
+                });
+            }
+
+            // Handle other errors
+            const statusCode = error.message.includes("required") ||
+                error.message.includes("exists") ? 400 : 500;
+
+            return res.status(statusCode).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    },
+
+    getPatientCompleteData: async (req, res) => {
+        try {
+            const { email } = req.params;
+
+            // Get patient data using the service
+            const patientData = await patientSensitiveDataService.getPatientDataByEmail(email);
+
+            return res.status(200).json({
+                success: true,
+                message: "Patient data retrieved successfully",
+                data: patientData
+            });
+
+        } catch (error) {
+            console.error('Error in getPatientCompleteData:', error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Failed to retrieve patient data"
+            });
+        }
+    },
+    readpatientdataByName: async (req, res) => {
+        try {
+            const { fullName } = req.params;
+            
+            // Input validation
+            if (!fullName) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Patient name is required"
+                });
+            }
+
+            // Check if patient exists
+            const notExist = await addpatientModel.findOne({ fullName: fullName });
+            if (!notExist) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Patient not found"
+                });
+            }
+
+            // Get patient data from service
+            const { patient, ipfsData } = await readpatientdataByName.readpatientdataByName(fullName);
+
+            // Format response
+            return res.status(200).json({
+                success: true,
+                message: "Patient data retrieved successfully",
+                data: {
+                    _id: patient._id,
+                    fullName: patient.fullName,
+                    email: patient.email,
+                    medicalDocument: patient.medicalDocument,
+                    // Include sensitive data from IPFS
+                    admitDate: ipfsData.admitDate,
+                    medicalCondition: ipfsData.medicalCondition,
+                    roomNumber: ipfsData.roomNumber,
+                    assignedDoctor: ipfsData.assignedDoctor,
+                    insuranceInformation: ipfsData.insuranceInformation,
+                    profileimage: ipfsData.profileimage,
+                    createdAt: patient.createdAt,
+                    updatedAt: patient.updatedAt
+                }
+            });
+        } catch (error) {
+            console.error("Controller: Error in readpatientdataByName:", error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error retrieving patient data"
+            });
+        }
+    },
+    readAllpatientdata: async (req, res) => {
+        try {
+            // Get all patients data from service
+            const patientsData = await readAllpatientdata.readAllpatientdata();
+
+            // Format the response
+            const formattedPatients = patientsData.map(({ patient, ipfsData }) => ({
+                _id: patient._id,
+                fullName: patient.fullName,
+                email: patient.email,
+                medicalDocument: patient.medicalDocument,
+                // Include sensitive data from IPFS
+                admitDate: ipfsData.admitDate,
+                medicalCondition: ipfsData.medicalCondition,
+                roomNumber: ipfsData.roomNumber,
+                assignedDoctor: ipfsData.assignedDoctor,
+                insuranceInformation: ipfsData.insuranceInformation,
+                profileimage: ipfsData.profileimage,
+                createdAt: patient.createdAt,
+                updatedAt: patient.updatedAt
+            }));
+
+            return res.status(200).json({
+                success: true,
+                message: "All patients data retrieved successfully",
+                count: formattedPatients.length,
+                data: formattedPatients
+            });
+        } catch (error) {
+            console.error("Controller: Error in readAllpatientdata:", error);
+            return res.status(error.message === "No patients found" ? 404 : 500).json({
+                success: false,
+                message: error.message || "Error retrieving patients data"
+            });
+        }
+    },
+    updatePatientData: async (req, res) => {
+        try {
+            const { fullName } = req.params;
+            const updateData = req.body;
+
+            // Validate input
+            if (!fullName) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Patient name is required"
+                });
+            }
+
+            // Validate update data
+            const allowedFields = ['age', 'gender', 'bloodGroup', 'medicalCondition', 'admitDate', 'assignedDoctor', 'roomNumber', 'contactNumber'];
+            const updateFields = Object.keys(updateData);
+            const invalidFields = updateFields.filter(field => !allowedFields.includes(field));
+
+            if (invalidFields.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid fields: ${invalidFields.join(', ')}`
+                });
+            }
+
+            // Update patient data
+            const { patient, ipfsData } = await updatePatientService.updatePatientData(fullName, updateData);
+
+            // Format response
+            return res.status(200).json({
+                success: true,
+                message: "Patient data updated successfully",
+                data: {
+                    _id: patient._id,
+                    fullName: patient.fullName,
+                    email: patient.email,
+                    admitDate: ipfsData.admitDate,
+                    medicalCondition: ipfsData.medicalCondition,
+                    roomNumber: ipfsData.roomNumber,
+                    assignedDoctor: ipfsData.assignedDoctor,
+                    bloodGroup: ipfsData.bloodGroup,
+                    phoneNumber: ipfsData.phoneNumber,
+                    updatedAt: patient.updatedAt
+                }
+            });
+        } catch (error) {
+            console.error("Controller: Error in updatePatientData:", error);
+            return res.status(error.message === "Patient not found" ? 404 : 500).json({
+                success: false,
+                message: error.message || "Error updating patient data"
             });
         }
     }

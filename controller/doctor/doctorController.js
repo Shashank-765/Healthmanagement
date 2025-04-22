@@ -161,7 +161,18 @@ module.exports = {
             }
 
             console.log("Error in createDoctor:", error);
-            return res.status(500).json({
+            
+            // Handle specific error cases
+            let statusCode = 500;
+            if (error.message.includes("must be signed up first")) {
+                statusCode = 403;
+            } else if (error.message.includes("already exists") || 
+                      error.message.includes("Missing required fields") ||
+                      error.message.includes("10 digits")) {
+                statusCode = 400;
+            }
+
+            return res.status(statusCode).json({
                 success: false,
                 message: error.message || "Internal server error"
             });

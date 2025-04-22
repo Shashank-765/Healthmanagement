@@ -5,6 +5,7 @@ const patientSignup = require('../models/patient/signupModel');
 const patientLogin = require('../models/patient/loginModel');
 const IPFSService = require('./ipfsService');
 const mnemonic = process.env.mnemonic;
+const addpatientModel = require('../models/patient/addpatientModel');
 
 const patientSignupService = {
     generateWallet: async () => {
@@ -213,7 +214,268 @@ const patientLoginService = {
     }
 };
 
+const addpatientService = {
+    validatePatientData: async (patientData) => {
+        try {
+            // Check if patient exists in signup based on fullName and email
+            const signedUpPatient = await patientSignup.findOne({
+                fullName: patientData.fullName,
+                email: patientData.email
+            });
+            
+            if (!signedUpPatient) {
+                throw new Error("Patient must be signed up first with same full name and email");
+            }
+
+            // Check if already added to addpatientModel
+            const existingPatient = await addpatientModel.findOne({ email: patientData.email });
+            if (existingPatient) {
+                throw new Error("Patient profile already exists");
+            }
+
+            // Validate required fields and their types
+            const requiredFields = {
+                medicalCondition: 'string',
+                admitDate: 'date',
+                medicalDocument: 'string',
+                roomNumber: 'number',
+                assignedDoctor: 'string',
+                medicalHistory: 'string',
+                insuranceInformation: 'string'
+            };
+
+            // Check for missing or invalid fields
+            const errors = [];
+            for (const [field, type] of Object.entries(requiredFields)) {
+                if (!patientData[field]) {
+                    errors.push(`${field} is required`);
+                } else {
+                    // Type validation
+                    if (type === 'number' && isNaN(Number(patientData[field]))) {
+                        errors.push(`${field} must be a number`);
+                    } else if (type === 'date' && isNaN(Date.parse(patientData[field]))) {
+                        errors.push(`${field} must be a valid date`);
+                    }
+                }
+            }
+
+            if (errors.length > 0) {
+                throw new Error(`AddPatient validation failed: ${errors.join(', ')}`);
+            }
+
+            // Return combined data
+            return {
+                // Data from signup (insensitive)
+                fullName: signedUpPatient.fullName,
+                email: signedUpPatient.email,
+                gender: signedUpPatient.gender,
+                dateOfBirth: signedUpPatient.dateOfBirth,
+                ipfsCID: signedUpPatient.ipfsCID,
+                ipfsIV: signedUpPatient.ipfsIV,
+
+                // Data from addpatient request
+                medicalCondition: patientData.medicalCondition,
+                admitDate: patientData.admitDate,
+                medicalDocument: patientData.medicalDocument,
+                roomNumber: parseInt(patientData.roomNumber),
+                assignedDoctor: patientData.assignedDoctor,
+                medicalHistory: patientData.medicalHistory,
+                insuranceInformation: patientData.insuranceInformation,
+
+                // Original signup data for IPFS
+                signupData: {
+                    password: signedUpPatient.password,
+                    age: signedUpPatient.age,
+                    phoneNumber: signedUpPatient.phoneNumber,
+                    bloodGroup: signedUpPatient.bloodGroup,
+                    emergencyContactNumber: signedUpPatient.emergencyContactNumber,
+                    knownAllergies: signedUpPatient.knownAllergies,
+                    currentMedication: signedUpPatient.currentMedication,
+                    walletAddress: signedUpPatient.walletAddress
+                }
+            };
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    savePatient: async (addpatientRequest) => {
+        try {
+            // Prepare data for IPFS
+            const ipfsData = {
+                password: addpatientRequest.signupData.password,
+                walletAddress: addpatientRequest.signupData.walletAddress,
+                phoneNumber: addpatientRequest.signupData.phoneNumber,
+                bloodGroup: addpatientRequest.signupData.bloodGroup,
+                emergencyContactNumber: addpatientRequest.signupData.emergencyContactNumber,
+                knownAllergies: addpatientRequest.signupData.knownAllergies,
+                currentMedication: addpatientRequest.signupData.currentMedication,
+                medicalHistory: addpatientRequest.medicalHistory,
+                medicalDocument: addpatientRequest.medicalDocument,
+                // Adding new sensitive fields to IPFS data
+                admitDate: addpatientRequest.admitDate,
+                medicalCondition: addpatientRequest.medicalCondition,
+                roomNumber: addpatientRequest.roomNumber,
+                assignedDoctor: addpatientRequest.assignedDoctor,
+                insuranceInformation: addpatientRequest.insuranceInformation
+            };
+
+            // Upload to IPFS and encrypt
+            const { cid, iv } = await IPFSService.uploadEncryptedData(ipfsData);
+
+            // Create MongoDB document with all required fields
+            const patient = new addpatientModel({
+                fullName: addpatientRequest.fullName,
+                email: addpatientRequest.email,
+                medicalCondition: addpatientRequest.medicalCondition,
+                admitDate: addpatientRequest.admitDate,
+                medicalDocument: addpatientRequest.medicalDocument,
+                roomNumber: parseInt(addpatientRequest.roomNumber),
+                assignedDoctor: addpatientRequest.assignedDoctor,
+                medicalHistory: addpatientRequest.medicalHistory,
+                insuranceInformation: addpatientRequest.insuranceInformation,
+                ipfsCID: cid,
+                ipfsIV: iv
+            });
+
+            // Save patient
+            const savedPatient = await patient.save();
+            return savedPatient;
+        } catch (error) {
+            console.error("Service: Error in savePatient:", error);
+            throw error;
+        }
+    }
+};
+
+const readpatientdataByName = {
+    readpatientdataByName: async (name) => {
+        try {
+            // Find patient in addpatientModel
+            const patient = await addpatientModel.findOne({ fullName: name });
+            if (!patient) {
+                throw new Error("Patient not found");
+            }
+
+            // Get IPFS data for sensitive information
+            const ipfsData = await IPFSService.retrieveAndDecrypt(
+                patient.ipfsCID,
+                patient.ipfsIV
+            );
+
+            // Return the raw data for controller to format
+            return {
+                patient,
+                ipfsData
+            };
+        } catch (error) {
+            console.error("Service: Error in readpatientdataByName:", error);
+            throw error;
+        }
+    }
+};
+
+const readAllpatientdata = {
+    readAllpatientdata: async () => {
+        try {
+            // Get all patients from addpatientModel
+            const patients = await addpatientModel.find();
+            if (!patients || patients.length === 0) {
+                throw new Error("No patients found");
+            }
+
+            // Get IPFS data for each patient
+            const patientsWithData = await Promise.all(patients.map(async (patient) => {
+                const ipfsData = await IPFSService.retrieveAndDecrypt(
+                    patient.ipfsCID,
+                    patient.ipfsIV
+                );
+                return {
+                    patient,
+                    ipfsData
+                };
+            }));
+
+            return patientsWithData;
+        } catch (error) {
+            console.error("Service: Error in readAllpatientdata:", error);
+            throw error;
+        }
+    }
+};
+
+const updatePatientService = {
+    updatePatientData: async (fullName, updateData) => {
+        try {
+            // Find patient in addpatientModel
+            const patient = await addpatientModel.findOne({ fullName });
+            if (!patient) {
+                throw new Error("Patient not found");
+            }
+
+            // Get current IPFS data
+            const currentIpfsData = await IPFSService.retrieveAndDecrypt(
+                patient.ipfsCID,
+                patient.ipfsIV
+            );
+
+            // Prepare updated IPFS data with all possible fields
+            const updatedIpfsData = {
+                ...currentIpfsData,
+                // Basic information
+                fullName: updateData.fullName || currentIpfsData.fullName,
+                email: updateData.email || currentIpfsData.email,
+                bloodGroup: updateData.bloodGroup || currentIpfsData.bloodGroup,
+                phoneNumber: updateData.phoneNumber || currentIpfsData.phoneNumber,
+                // Additional medical information
+                medicalCondition: updateData.medicalCondition || currentIpfsData.medicalCondition,
+                roomNumber: updateData.roomNumber || currentIpfsData.roomNumber,
+                assignedDoctor: updateData.assignedDoctor || currentIpfsData.assignedDoctor,
+                emergencyContactNumber: updateData.emergencyContactNumber || currentIpfsData.emergencyContactNumber
+            };
+
+            // Upload updated data to IPFS
+            const ipfsResult = await IPFSService.uploadEncryptedData(updatedIpfsData);
+
+            // Update patient in MongoDB with both IPFS references and direct data
+            const updatedPatient = await addpatientModel.findOneAndUpdate(
+                { fullName },
+                { 
+                    $set: {
+                        // Update IPFS references
+                        ipfsCID: ipfsResult.cid,
+                        ipfsIV: ipfsResult.iv,
+                        // Update direct data in MongoDB
+                        fullName: updatedIpfsData.fullName,
+                        email: updatedIpfsData.email,
+                        medicalCondition: updatedIpfsData.medicalCondition,
+                        roomNumber: updatedIpfsData.roomNumber,
+                        assignedDoctor: updatedIpfsData.assignedDoctor
+                    }
+                },
+                { new: true }
+            );
+
+            if (!updatedPatient) {
+                throw new Error("Failed to update patient record");
+            }
+
+            return {
+                patient: updatedPatient,
+                ipfsData: updatedIpfsData
+            };
+        } catch (error) {
+            console.error("Service: Error in updatePatientData:", error);
+            throw error;
+        }
+    }
+};
+
 module.exports = {
     patientSignupService,
-    patientLoginService
+    patientLoginService,
+    addpatientService,
+    readpatientdataByName,
+    readAllpatientdata,
+    updatePatientService
 };

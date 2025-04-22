@@ -36,4 +36,19 @@ router.get('/:cid/sensitive-data',
     patientController.getSensitiveData
 );
 
+router.post('/addpatient', 
+    upload.single('profileimage'),
+    handleMulterError,
+    parseFormData,
+    patientController.addPatient
+);
+
+// Route to get patient data
+router.get('/addpatient/:email', patientController.getPatientCompleteData);
+router.get('/allpatientdata', patientController.readAllpatientdata);
+router.get('/patientdata/:fullName', patientController.readpatientdataByName);
+router.put('/update-patientdata/:fullName', patientController.updatePatientData);
+// router.delete('/delete-patientdata/:fullName', patientController.deletePatientData);
+// router.delete('/delete-patientdata/:fullName', patientController.deletePatientData);
+
 module.exports = router;

@@ -10,8 +10,19 @@ const patientLoginSchema = new Schema({
     password: {
         type: String,
         required: true
+    },
+    token: {
+        type: String,
+        required: true
+    },
+    lastLogin: {
+        type: Date,
+        default: Date.now
     }
-}, { timestamps: true });
+}, { 
+    timestamps: true,
+    versionKey: false  // This will remove the __v field
+});
 
 const PatientLogin = mongoose.model('PatientLogin', patientLoginSchema);
 
