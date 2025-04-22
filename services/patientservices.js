@@ -471,11 +471,35 @@ const updatePatientService = {
     }
 };
 
+const deletePatientService = {
+    deletePatientData: async (fullName) => {
+        try {
+            // Find patient in addpatientModel
+            const patient = await addpatientModel.findOne({ fullName });
+
+            if (!patient) {
+                throw new Error("Patient not found");
+            }
+
+            // Delete patient from addpatientModel
+            await addpatientModel.deleteOne({ fullName });
+
+            return {
+                message: "Patient deleted successfully"
+            };
+        } catch (error) {
+            console.error("Service: Error in deletePatientData:", error);
+            throw error;
+        }
+    }
+};
+
 module.exports = {
     patientSignupService,
     patientLoginService,
     addpatientService,
     readpatientdataByName,
     readAllpatientdata,
-    updatePatientService
+    updatePatientService,
+    deletePatientService
 };

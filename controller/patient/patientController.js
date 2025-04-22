@@ -1,5 +1,5 @@
 const express = require('express');
-const { patientSignupService, patientLoginService, addpatientService, readpatientdataByName, readAllpatientdata, updatePatientService } = require('../../services/patientservices');
+const { patientSignupService, patientLoginService, addpatientService, readpatientdataByName, readAllpatientdata, updatePatientService, deletePatientService } = require('../../services/patientservices');
 const upload = require('../../utils/multer');
 const patientLogin = require('../../models/patient/loginModel');
 const IPFSService = require('../../services/ipfsService');
@@ -396,6 +396,19 @@ module.exports = {
             return res.status(error.message === "Patient not found" ? 404 : 500).json({
                 success: false,
                 message: error.message || "Error updating patient data"
+            });
+        }
+    },
+    deletePatientData: async (req,res)=>{
+        try {
+            const { fullName } = req.params;
+            const result = await deletePatientService.deletePatientData(fullName);
+            return res.status(200).json(result);
+        } catch (error) {
+            console.error("Controller: Error in deletePatientData:", error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error deleting patient data"
             });
         }
     }
