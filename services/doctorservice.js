@@ -188,11 +188,13 @@ const doctorLoginService = {
 };
 
 const createdDoctor = {
-    validateDoctorData: async (doctorData) => {
+    validateDoctorData: async (doctorData, userRole) => {
         try {
             // First check if doctor exists in doctorSignup collection
             const signedUpDoctor = await doctorSignup.findOne({ email: doctorData.email });
-            if (!signedUpDoctor) {
+            
+            // For non-admin roles, require doctor to exist in signup
+            if (userRole !== 'admin' && !signedUpDoctor) {
                 throw new Error("Doctor must be signed up first");
             }
 
@@ -207,26 +209,69 @@ const createdDoctor = {
                 throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
             }
 
+            // Handle contact number
+            let contactnumber = doctorData.contactnumber;
+            if (!contactnumber && signedUpDoctor) {
+                contactnumber = signedUpDoctor.contactNumber;
+            }
+            if (!contactnumber) {
+                throw new Error("Contact number is required");
+            }
+
+            // Validate contact number format
+            if (!/^\d{10}$/.test(contactnumber)) {
+                throw new Error("Contact number must be exactly 10 digits");
+            }
+
             // Check if already added to adddoctorModel
             const existEmail = await adddoctorModel.findOne({ email: doctorData.email });
             if (existEmail) {
                 throw new Error("Doctor profile already exists");
             }
 
-            // Combine signup data with new data
-            return {
-                fullName: signedUpDoctor.fullName,
-                email: signedUpDoctor.email,
-                password: signedUpDoctor.password,
+            // Basic data that will always be included
+            let returnData = {
+                fullName: doctorData.fullName,
+                email: doctorData.email,
                 specialization: doctorData.specialization,
                 experience: doctorData.experience || 0,
                 availability: doctorData.availability,
-                contactnumber: doctorData.contactnumber || signedUpDoctor.contactNumber,
+                contactnumber: contactnumber,
                 qualification: doctorData.qualification,
                 address: doctorData.address,
                 bio: doctorData.bio,
                 profileimage: doctorData.profileimage || null
             };
+
+            // Only include signup data if doctor exists in signup database
+            if (signedUpDoctor) {
+                returnData = {
+                    ...returnData,
+                    password: signedUpDoctor.password,
+                    medicalLicenseNumber: signedUpDoctor.medicalLicenseNumber,
+                    medicalDocument: signedUpDoctor.medicalDocument,
+                    walletAddress: signedUpDoctor.walletAddress,
+                    gender: signedUpDoctor.gender,
+                    dateOfBirth: signedUpDoctor.dateOfBirth,
+                    age: signedUpDoctor.age,
+                    hospitalClinicName: signedUpDoctor.hospitalClinicName
+                };
+            } else {
+                // For new doctors, set default values for required fields
+                returnData = {
+                    ...returnData,
+                    password: doctorData.password || null,
+                    medicalLicenseNumber: doctorData.medicalLicenseNumber || null,
+                    medicalDocument: doctorData.medicalDocument || null,
+                    walletAddress: doctorData.walletAddress || null,
+                    gender: doctorData.gender || null,
+                    dateOfBirth: doctorData.dateOfBirth || null,
+                    age: doctorData.age || null,
+                    hospitalClinicName: doctorData.hospitalClinicName || null
+                };
+            }
+
+            return returnData;
         } catch (error) {
             throw error;
         }
@@ -234,14 +279,10 @@ const createdDoctor = {
 
     saveDoctor: async (validatedDoctorData) => {
         try {
-            // Get original signup data
-            const signupData = await doctorSignup.findOne({ email: validatedDoctorData.email });
-            
-            // Create MongoDB document combining signup and new data
+            // Create MongoDB document with basic data
             const mongoData = {
                 fullName: validatedDoctorData.fullName,
                 email: validatedDoctorData.email,
-                password: validatedDoctorData.password,
                 specialization: validatedDoctorData.specialization,
                 experience: validatedDoctorData.experience,
                 availability: validatedDoctorData.availability,
@@ -252,56 +293,72 @@ const createdDoctor = {
                 profileimage: validatedDoctorData.profileimage
             };
 
+            // If we have signup data, include it
+            if (validatedDoctorData.password) {
+                mongoData.password = validatedDoctorData.password;
+                mongoData.medicalLicenseNumber = validatedDoctorData.medicalLicenseNumber;
+                mongoData.medicalDocument = validatedDoctorData.medicalDocument;
+                mongoData.walletAddress = validatedDoctorData.walletAddress;
+                mongoData.gender = validatedDoctorData.gender;
+                mongoData.dateOfBirth = validatedDoctorData.dateOfBirth;
+                mongoData.age = validatedDoctorData.age;
+                mongoData.hospitalClinicName = validatedDoctorData.hospitalClinicName;
+            }
+
             // Create doctor in MongoDB
             const doctor = await adddoctorModel.create(mongoData);
 
-            // Store ALL fields in IPFS
-            const allData = {
-                // Basic info
-                fullName: validatedDoctorData.fullName,
-                email: validatedDoctorData.email,
-                password: validatedDoctorData.password,
-                
-                // Additional info
-                specialization: validatedDoctorData.specialization,
-                experience: validatedDoctorData.experience,
-                availability: validatedDoctorData.availability,
-                contactnumber: validatedDoctorData.contactnumber,
-                qualification: validatedDoctorData.qualification,
-                address: validatedDoctorData.address,
-                bio: validatedDoctorData.bio,
-                profileimage: validatedDoctorData.profileimage,
-                
-                // Original signup data
-                medicalLicenseNumber: signupData.medicalLicenseNumber,
-                medicalDocument: signupData.medicalDocument,
-                walletAddress: signupData.walletAddress,
-                gender: signupData.gender,
-                dateOfBirth: signupData.dateOfBirth,
-                age: signupData.age,
-                hospitalClinicName: signupData.hospitalClinicName
-            };
+            // Store data in IPFS only if we have signup data
+            if (validatedDoctorData.password) {
+                const allData = {
+                    // Basic info
+                    fullName: validatedDoctorData.fullName,
+                    email: validatedDoctorData.email,
+                    password: validatedDoctorData.password,
+                    
+                    // Additional info
+                    specialization: validatedDoctorData.specialization,
+                    experience: validatedDoctorData.experience,
+                    availability: validatedDoctorData.availability,
+                    contactnumber: validatedDoctorData.contactnumber,
+                    qualification: validatedDoctorData.qualification,
+                    address: validatedDoctorData.address,
+                    bio: validatedDoctorData.bio,
+                    profileimage: validatedDoctorData.profileimage,
+                    
+                    // Original signup data
+                    medicalLicenseNumber: validatedDoctorData.medicalLicenseNumber,
+                    medicalDocument: validatedDoctorData.medicalDocument,
+                    walletAddress: validatedDoctorData.walletAddress,
+                    gender: validatedDoctorData.gender,
+                    dateOfBirth: validatedDoctorData.dateOfBirth,
+                    age: validatedDoctorData.age,
+                    hospitalClinicName: validatedDoctorData.hospitalClinicName
+                };
 
-            // Upload all data to IPFS
-            const ipfsResult = await IPFSService.uploadEncryptedData(allData);
-            console.log("IPFS Result:", ipfsResult);
+                // Upload all data to IPFS
+                const ipfsResult = await IPFSService.uploadEncryptedData(allData);
+                console.log("IPFS Result:", ipfsResult);
 
-            // Update doctor with IPFS data
-            const updatedDoctor = await adddoctorModel.findByIdAndUpdate(
-                doctor._id,
-                { 
-                    ipfsCID: ipfsResult.cid,
-                    ipfsIV: ipfsResult.iv
-                },
-                { new: true }
-            );
+                // Update doctor with IPFS data
+                const updatedDoctor = await adddoctorModel.findByIdAndUpdate(
+                    doctor._id,
+                    { 
+                        ipfsCID: ipfsResult.cid,
+                        ipfsIV: ipfsResult.iv
+                    },
+                    { new: true }
+                );
 
-            if (!updatedDoctor) {
-                throw new Error("Failed to create doctor record");
+                if (!updatedDoctor) {
+                    throw new Error("Failed to create doctor record");
+                }
+
+                console.log("Updated Doctor with IPFS:", updatedDoctor);
+                return updatedDoctor;
             }
 
-            console.log("Updated Doctor with IPFS:", updatedDoctor);
-            return updatedDoctor;
+            return doctor;
         } catch (error) {
             console.error('Error in saveDoctor:', error);
             throw error;

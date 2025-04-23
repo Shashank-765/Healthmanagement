@@ -4,10 +4,12 @@ const connectDB = require("./database/database");
 require('dotenv').config();
 const patientRoute = require("./routes/patientRoute");
 const doctorRoute = require("./routes/doctorRoute");
+const adminRoute = require("./routes/adminRoute");
 const authMiddleware = require("./middleware/middleware");
 const path = require('path');
 const fs = require('fs');
-
+const cors = require('cors');
+app.use(cors());
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -22,6 +24,7 @@ if (!fs.existsSync('uploads')) {
 
 app.use('/api/v1/patient', patientRoute);
 app.use('/api/v1/doctor', doctorRoute);
+app.use('/api/v1/admin', adminRoute);
 
 const PORT = process.env.PORT || 5000;
 

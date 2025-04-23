@@ -215,15 +215,16 @@ const patientLoginService = {
 };
 
 const addpatientService = {
-    validatePatientData: async (patientData) => {
+    validatePatientData: async (patientData, userRole) => {
         try {
-            // Check if patient exists in signup based on fullName and email
+            // Check if patient exists in signup database
             const signedUpPatient = await patientSignup.findOne({
                 fullName: patientData.fullName,
                 email: patientData.email
             });
-            
-            if (!signedUpPatient) {
+
+            // For non-admin roles, require patient to exist in signup
+            if (userRole !== 'admin' && !signedUpPatient) {
                 throw new Error("Patient must be signed up first with same full name and email");
             }
 
@@ -263,37 +264,41 @@ const addpatientService = {
                 throw new Error(`AddPatient validation failed: ${errors.join(', ')}`);
             }
 
-            // Return combined data
-            return {
-                // Data from signup (insensitive)
-                fullName: signedUpPatient.fullName,
-                email: signedUpPatient.email,
-                gender: signedUpPatient.gender,
-                dateOfBirth: signedUpPatient.dateOfBirth,
-                ipfsCID: signedUpPatient.ipfsCID,
-                ipfsIV: signedUpPatient.ipfsIV,
-
-                // Data from addpatient request
+            // Basic data that will always be included
+            let returnData = {
+                fullName: patientData.fullName,
+                email: patientData.email,
                 medicalCondition: patientData.medicalCondition,
                 admitDate: patientData.admitDate,
                 medicalDocument: patientData.medicalDocument,
                 roomNumber: parseInt(patientData.roomNumber),
                 assignedDoctor: patientData.assignedDoctor,
                 medicalHistory: patientData.medicalHistory,
-                insuranceInformation: patientData.insuranceInformation,
-
-                // Original signup data for IPFS
-                signupData: {
-                    password: signedUpPatient.password,
-                    age: signedUpPatient.age,
-                    phoneNumber: signedUpPatient.phoneNumber,
-                    bloodGroup: signedUpPatient.bloodGroup,
-                    emergencyContactNumber: signedUpPatient.emergencyContactNumber,
-                    knownAllergies: signedUpPatient.knownAllergies,
-                    currentMedication: signedUpPatient.currentMedication,
-                    walletAddress: signedUpPatient.walletAddress
-                }
+                insuranceInformation: patientData.insuranceInformation
             };
+
+            // Only include signup data if patient exists in signup database
+            if (signedUpPatient) {
+                returnData = {
+                    ...returnData,
+                    gender: signedUpPatient.gender,
+                    dateOfBirth: signedUpPatient.dateOfBirth,
+                    ipfsCID: signedUpPatient.ipfsCID,
+                    ipfsIV: signedUpPatient.ipfsIV,
+                    signupData: {
+                        password: signedUpPatient.password,
+                        age: signedUpPatient.age,
+                        phoneNumber: signedUpPatient.phoneNumber,
+                        bloodGroup: signedUpPatient.bloodGroup,
+                        emergencyContactNumber: signedUpPatient.emergencyContactNumber,
+                        knownAllergies: signedUpPatient.knownAllergies,
+                        currentMedication: signedUpPatient.currentMedication,
+                        walletAddress: signedUpPatient.walletAddress
+                    }
+                };
+            }
+
+            return returnData;
         } catch (error) {
             throw error;
         }
@@ -303,26 +308,29 @@ const addpatientService = {
         try {
             // Prepare data for IPFS
             const ipfsData = {
-                password: addpatientRequest.signupData.password,
-                walletAddress: addpatientRequest.signupData.walletAddress,
-                phoneNumber: addpatientRequest.signupData.phoneNumber,
-                bloodGroup: addpatientRequest.signupData.bloodGroup,
-                emergencyContactNumber: addpatientRequest.signupData.emergencyContactNumber,
-                knownAllergies: addpatientRequest.signupData.knownAllergies,
-                currentMedication: addpatientRequest.signupData.currentMedication,
                 medicalHistory: addpatientRequest.medicalHistory,
                 medicalDocument: addpatientRequest.medicalDocument,
-                // Adding new sensitive fields to IPFS data
                 admitDate: addpatientRequest.admitDate,
                 medicalCondition: addpatientRequest.medicalCondition,
                 roomNumber: addpatientRequest.roomNumber,
                 assignedDoctor: addpatientRequest.assignedDoctor,
                 insuranceInformation: addpatientRequest.insuranceInformation
             };
-
+    
+            // Include signupData fields only if signupData exists
+            if (addpatientRequest.signupData) {
+                ipfsData.password = addpatientRequest.signupData.password;
+                ipfsData.walletAddress = addpatientRequest.signupData.walletAddress;
+                ipfsData.phoneNumber = addpatientRequest.signupData.phoneNumber;
+                ipfsData.bloodGroup = addpatientRequest.signupData.bloodGroup;
+                ipfsData.emergencyContactNumber = addpatientRequest.signupData.emergencyContactNumber;
+                ipfsData.knownAllergies = addpatientRequest.signupData.knownAllergies;
+                ipfsData.currentMedication = addpatientRequest.signupData.currentMedication;
+            }
+    
             // Upload to IPFS and encrypt
             const { cid, iv } = await IPFSService.uploadEncryptedData(ipfsData);
-
+    
             // Create MongoDB document with all required fields
             const patient = new addpatientModel({
                 fullName: addpatientRequest.fullName,
@@ -337,7 +345,7 @@ const addpatientService = {
                 ipfsCID: cid,
                 ipfsIV: iv
             });
-
+    
             // Save patient
             const savedPatient = await patient.save();
             return savedPatient;

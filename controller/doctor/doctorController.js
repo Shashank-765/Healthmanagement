@@ -124,6 +124,19 @@ module.exports = {
     },
     createDoctor: async (req, res) => {
         try {
+            // Get token from header
+            const token = req.headers.authorization?.split(' ')[1];
+            if (!token) {
+                return res.status(401).json({
+                    success: false,
+                    message: "No token provided"
+                });
+            }
+
+            // Verify token and get user role
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const userRole = decoded.role;
+
             const doctorData = req.body;
             
             // Handle file upload if present
@@ -138,8 +151,8 @@ module.exports = {
                 doctorData.profileimage = req.file.path;
             }
             
-            // Validate and process data using service
-            const validatedData = await createdDoctor.validateDoctorData(doctorData);
+            // Validate and process data using service with user role
+            const validatedData = await createdDoctor.validateDoctorData(doctorData, userRole);
             const newDoctor = await createdDoctor.saveDoctor(validatedData);
 
             return res.status(201).json({
@@ -164,7 +177,9 @@ module.exports = {
             
             // Handle specific error cases
             let statusCode = 500;
-            if (error.message.includes("must be signed up first")) {
+            if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+                statusCode = 401;
+            } else if (error.message.includes("must be signed up first")) {
                 statusCode = 403;
             } else if (error.message.includes("already exists") || 
                       error.message.includes("Missing required fields") ||

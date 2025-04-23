@@ -8,6 +8,7 @@ const doctorSignup = require('../../models/doctor/signupModel');
 const encryptionService = require('../../utils/encryptdecrypt');
 const patientSensitiveDataService = require('../../services/patientSensitiveDataService');
 const addpatientModel = require('../../models/patient/addpatientModel');
+const jwt = require('jsonwebtoken');
 
 module.exports = {
     patientSignup: async (req, res) => {
@@ -170,6 +171,19 @@ module.exports = {
 
     addPatient: async (req, res) => {
         try {
+            // Get token from header
+            const token = req.headers.authorization?.split(' ')[1];
+            if (!token) {
+                return res.status(401).json({
+                    success: false,
+                    message: "No token provided"
+                });
+            }
+
+            // Verify token and get user role
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const userRole = decoded.role;
+
             // Create patient data object
             const patientData = {
                 fullName: req.body.fullName,
@@ -184,8 +198,8 @@ module.exports = {
                 // profileimage: req.file.path // Use the uploaded file path
             };
 
-            // Validate and create patient
-            const validatedData = await addpatientService.validatePatientData(patientData);
+            // Validate and create patient with user role
+            const validatedData = await addpatientService.validatePatientData(patientData, userRole);
             const patient = await addpatientService.savePatient(validatedData);
 
             // Send success response
@@ -223,6 +237,14 @@ module.exports = {
                 return res.status(400).json({
                     success: false,
                     message: error.message
+                });
+            }
+
+            // Handle token errors
+            if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+                return res.status(401).json({
+                    success: false,
+                    message: "Invalid or expired token"
                 });
             }
 
