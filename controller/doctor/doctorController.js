@@ -196,12 +196,29 @@ module.exports = {
 
     getDoctors: async (req, res) => {
         try {
-            const filters = req.query;
+            // Extract filters from query parameters
+            const filters = {
+                specialization: req.query.specialization,
+                fullName: req.query.fullName
+            };
+
+            console.log('Received filters:', filters);
+
             const doctors = await doctorManagementService.getDoctors(filters);
+
+            // If no doctors found with filters, return appropriate response
+            if (doctors.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    message: "No doctors found with the given filters",
+                    data: []
+                });
+            }
 
             return res.status(200).json({
                 success: true,
                 message: "Doctors fetched successfully",
+                count: doctors.length,
                 data: doctors
             });
         } catch (error) {

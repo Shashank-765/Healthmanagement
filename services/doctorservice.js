@@ -369,26 +369,34 @@ const createdDoctor = {
 const doctorManagementService = {
     getDoctors: async (filters) => {
         try {
-            const { specialization, name } = filters;
+            const { specialization, fullName } = filters;
             let query = {};
 
             // Add filters if provided
             if (specialization) {
-                query.specialization = specialization;
+                query.specialization = { $regex: new RegExp(specialization, 'i') }; // Case-insensitive search
             }
-            if (name) {
-                query.fullName = { $regex: name, $options: 'i' }; // Case-insensitive search
+            if (fullName) {
+                query.fullName = { $regex: new RegExp(fullName, 'i') }; // Case-insensitive search
             }
+
+            console.log('Filter Query:', query);
 
             // Fetch doctors with selected fields
             const doctors = await adddoctorModel.find(query)
-                .select('profileimage fullName specialization experience availability contactnumber email')
+                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio')
                 .lean();
 
+            if (doctors.length === 0) {
+                console.log('No doctors found with the given filters');
+                return [];
+            }
+
+            console.log(`Found ${doctors.length} doctors`);
             return doctors;
         } catch (error) {
             console.error('Error in getDoctors service:', error);
-            throw error;
+            throw new Error(`Failed to fetch doctors: ${error.message}`);
         }
     },
 

@@ -1,4 +1,6 @@
 const express = require('express');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const app = express();
 const connectDB = require("./database/database");
 require('dotenv').config();
@@ -8,9 +10,23 @@ const adminRoute = require("./routes/adminRoute");
 const authMiddleware = require("./middleware/middleware");
 const path = require('path');
 const fs = require('fs');
-const cors = require('cors');
-app.use(cors());
-// Middleware
+
+// CORS configuration
+const corsOptions = {
+    origin: 'http://localhost:3000', // Your frontend URL
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    exposedHeaders: ['Set-Cookie'],
+    maxAge: 86400 // 24 hours
+};
+
+app.use(cors(corsOptions));
+
+// Cookie parser middleware
+app.use(cookieParser());
+
+// Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

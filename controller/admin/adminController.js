@@ -1,5 +1,12 @@
 const express = require('express');
 const { adminSignupService, adminLoginService } = require('../../services/adminservice');
+const adminSignupModel = require('../../models/admin/adminSignupModel');
+const patientSignupModel = require ("../../models/patient/signupModel")
+const doctorSignupModel = require("../../models/doctor/signupModel");
+const addpatientModel = require("../../models/patient/addpatientModel");
+const adddoctorModel = require("../../models/doctor/adddoctorModel");
+
+// const adminLoginModel = require('../models/admin/adminloginModel');
 
 module.exports = {
     adminSignup: async (req, res) => {
@@ -52,17 +59,26 @@ module.exports = {
                 req.body.password
             );
 
-            // Return success response
+            if (!token) {
+                throw new Error("Token generation failed");
+            }
+
+            // Set cookie
+            res.cookie('adminToken', token, {
+                expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict'
+            });
+
+            // Return success response with token
             return res.status(200).json({
                 success: true,
                 message: "Admin login successful",
                 data: {
                     _id: admin._id,
                     email: admin.email,
-                    password: admin.password,
-                    token: token,
-                    // hospitalName: admin.hospitalName,
-                    // token: token
+                    token: token // Ensure token is included in response
                 }
             });
 
@@ -83,5 +99,77 @@ module.exports = {
                 message: error.message || "Internal server error"
             });
         }
+    },
+    getAdminData: async (req, res) => {
+        try {
+            // Get admin ID from token
+            const adminId = req.user?.id;
+            
+            if (!adminId) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Unauthorized: No admin ID found in token"
+                });
+            }
+
+            // Find admin data
+            const admin = await adminSignupModel.findById(adminId);
+            if (!admin) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Admin not found"
+                });
+            }
+const totalpatients=await patientSignupModel.countDocuments();
+const totaldoctors=await doctorSignupModel.countDocuments();
+const newPatients=await addpatientModel.countDocuments();
+const newDoctors=await adddoctorModel.countDocuments();
+            // Return admin data
+            return res.status(200).json({
+                success: true,
+                message: "Admin data fetched successfully",
+                data: {
+                    _id: admin._id,
+                    fullName: admin.fullName,
+                    email: admin.email,
+                    hospitalName: admin.hospitalName,
+                    totalHospitals: admin.totalHospitals,
+                    totalBeds: admin.totalBeds,
+                    totalPatients:totalpatients,
+                    totalDoctors:totaldoctors,
+                    newPatients:newPatients,
+                    newDoctors:newDoctors,
+                    staffInformation: admin.staffInformation,
+                    createdAt: admin.createdAt,
+                    updatedAt: admin.updatedAt
+                }
+            });
+
+        } catch (error) {
+            console.log("Error fetching admin data:", error.message);
+            
+            // Handle specific error cases
+            if (error.name === 'JsonWebTokenError') {
+                return res.status(401).json({
+                    success: false,
+                    message: "Invalid token"
+                });
+            }
+
+            if (error.name === 'TokenExpiredError') {
+                return res.status(401).json({
+                    success: false,
+                    message: "Token expired"
+                });
+            }
+
+            // Handle other errors
+            return res.status(500).json({
+                success: false,
+                message: "Internal server error",
+                error: error.message
+            });
+        }
     }
 };
+// controllers/adminController.js

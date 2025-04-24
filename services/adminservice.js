@@ -120,7 +120,6 @@ const adminLoginService = {
             // Update or create login record
             await adminLoginModel.findOneAndUpdate(
                 { email: admin.email },
-
                 loginData,
                 { upsert: true, new: true }
             );

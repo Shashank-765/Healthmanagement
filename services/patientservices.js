@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { ethers } = require('ethers');
 const bcrypt = require('bcryptjs');
+const Cookies = require('js-cookie');
 const patientSignup = require('../models/patient/signupModel');
 const patientLogin = require('../models/patient/loginModel');
 const IPFSService = require('./ipfsService');
@@ -202,6 +203,12 @@ const patientLoginService = {
                 { expiresIn: '30d' }
             );
 
+            // Store token in cookie
+            Cookies.set('patientToken', token, { 
+                expires: 30, // 30 days
+                sameSite: 'strict'
+            });
+
             return {
                 patient,
                 sensitiveData,
@@ -384,13 +391,24 @@ const readpatientdataByName = {
 };
 
 const readAllpatientdata = {
-    readAllpatientdata: async () => {
+    readAllpatientdata: async (filters) => {
         try {
-            // Get all patients from addpatientModel
-            const patients = await addpatientModel.find();
+            // Build query based on filters
+            let query = {};
+            if (filters?.fullName) {
+                query.fullName = { $regex: new RegExp(filters.fullName, 'i') }; // Case-insensitive search
+            }
+
+            console.log('Filter Query:', query);
+
+            // Get all patients from addpatientModel with filters
+            const patients = await addpatientModel.find(query);
             if (!patients || patients.length === 0) {
+                console.log('No patients found with the given filters');
                 throw new Error("No patients found");
             }
+
+            console.log(`Found ${patients.length} patients`);
 
             // Get IPFS data for each patient
             const patientsWithData = await Promise.all(patients.map(async (patient) => {

@@ -38,7 +38,9 @@ router.get('/:cid/sensitive-data',
 
 // Route to get patient data
 router.post('/addpatient', upload.single('profileimage'),handleMulterError,parseFormData,patientController.addPatient);
+//for ipfs data
 router.get('/addpatient/:email', patientController.getPatientCompleteData);
+//crud for patient
 router.get('/allpatientdata', patientController.readAllpatientdata);
 router.get('/patientdata/:fullName', patientController.readpatientdataByName);
 router.put('/update/:fullName', patientController.updatePatientData);

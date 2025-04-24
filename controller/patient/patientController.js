@@ -171,8 +171,13 @@ module.exports = {
 
     addPatient: async (req, res) => {
         try {
-            // Get token from header
-            const token = req.headers.authorization?.split(' ')[1];
+            // Get token from header or cookies
+            let token = req.headers.authorization?.split(' ')[1];
+            if (!token) {
+                // Check for token in cookies
+                token = req.cookies?.adminToken || req.cookies?.patientToken;
+            }
+
             if (!token) {
                 return res.status(401).json({
                     success: false,
@@ -334,8 +339,15 @@ module.exports = {
     },
     readAllpatientdata: async (req, res) => {
         try {
-            // Get all patients data from service
-            const patientsData = await readAllpatientdata.readAllpatientdata();
+            // Extract filters from query parameters
+            const filters = {
+                fullName: req.query.fullName
+            };
+
+            console.log('Received filters:', filters);
+
+            // Get all patients data from service with filters
+            const patientsData = await readAllpatientdata.readAllpatientdata(filters);
 
             // Format the response
             const formattedPatients = patientsData.map(({ patient, ipfsData }) => ({
@@ -362,7 +374,18 @@ module.exports = {
             });
         } catch (error) {
             console.error("Controller: Error in readAllpatientdata:", error);
-            return res.status(error.message === "No patients found" ? 404 : 500).json({
+            
+            // Handle specific error cases
+            if (error.message === "No patients found") {
+                return res.status(200).json({
+                    success: true,
+                    message: "No patients found with the given filters",
+                    count: 0,
+                    data: []
+                });
+            }
+
+            return res.status(500).json({
                 success: false,
                 message: error.message || "Error retrieving patients data"
             });

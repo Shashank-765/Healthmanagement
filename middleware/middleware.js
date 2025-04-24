@@ -1,23 +1,25 @@
 const jwt = require('jsonwebtoken');
+const Cookies = require('js-cookie');
 
 const authMiddleware = {
     authenticateToken: (req, res, next) => {
         try {
+            // Check for token in Authorization header
             const authHeader = req.headers.authorization;
-            if (!authHeader) {
-                return res.status(401).json({
-                    statusCode: 401,
-                    success: false,
-                    message: "No token provided"
-                });
+            let token;
+
+            if (authHeader) {
+                token = authHeader.split(' ')[1];
+            } else {
+                // Check for token in cookies
+                token = req.cookies?.adminToken;
             }
 
-            const token = authHeader.split(' ')[1];
             if (!token) {
                 return res.status(401).json({
                     statusCode: 401,
                     success: false,
-                    message: "Invalid token format"
+                    message: "No token provided"
                 });
             }
 
