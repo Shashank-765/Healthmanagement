@@ -3,6 +3,7 @@ const router = express.Router();
 const patientController = require('../controller/patient/patientController');
 const upload = require('../utils/multer');
 const authMiddleware = require('../middleware/middleware');
+const { authenticateToken } = require('../middleware/auth');
 
 // Error handling middleware for multer
 const handleMulterError = (err, req, res, next) => {
@@ -37,7 +38,12 @@ router.get('/:cid/sensitive-data',
 );
 
 // Route to get patient data
-router.post('/addpatient', upload.single('profileimage'),handleMulterError,parseFormData,patientController.addPatient);
+router.post('/addpatient', 
+    upload.single('profileimage'),
+    handleMulterError,
+    parseFormData,
+    patientController.addPatient
+);
 //for ipfs data
 router.get('/addpatient/:email', patientController.getPatientCompleteData);
 //crud for patient
@@ -46,4 +52,8 @@ router.get('/patientdata/:fullName', patientController.readpatientdataByName);
 router.put('/update/:fullName', patientController.updatePatientData);
 router.delete('/delete-patientdata/:fullName', patientController.deletePatientData);
 
+// Add these new routes while keeping existing ones
+router.post('/assign-primary-doctor', patientController.assignPrimaryDoctor);
+router.get('/patient-dashboard', authMiddleware.authenticateToken, patientController.getPatientDashboard);
+// router.post('/add-appointment', patientController.addAppointmentToPatient);
 module.exports = router;

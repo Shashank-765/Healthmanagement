@@ -7,7 +7,10 @@ const patientLogin = require('../models/patient/loginModel');
 const IPFSService = require('./ipfsService');
 const mnemonic = process.env.mnemonic;
 const addpatientModel = require('../models/patient/addpatientModel');
-
+const AddDoctorModel = require('../models/doctor/adddoctorModel');
+const appointmentModel = require('../models/appointment/appointmentModel');
+const medicalHistoryModel = require('../models/medicalHistory/medicalHistoryModel');
+// const AddPatient = require('../models/patient/addpatientModel');
 const patientSignupService = {
     generateWallet: async () => {
         try {
@@ -26,6 +29,14 @@ const patientSignupService = {
         try {
             if (!patientData) {
                 throw new Error("Patient data is required");
+            }
+
+            // Add password validation
+            if (!patientData.password) {
+                throw new Error("Password is required");
+            }
+            if (patientData.password.length < 8) {
+                throw new Error("Password must be at least 8 characters long");
             }
 
             // Check if email exists
@@ -163,54 +174,61 @@ const patientLoginService = {
     validateLogin: async (email, password) => {
         try {
             console.log("1. Starting login validation...");
+            console.log("Email received:", email);
             
-            if (!email || !password) {
-                throw new Error("Email and password are required");
-            }
-
-            const patient = await patientSignup.findOne({ email });
+            // 1. Pehle patientSignup mein check karo
+            const patient = await patientSignup.findOne({ 
+                email: { $regex: new RegExp(`^${email}$`, 'i') }
+            });
+            
+            console.log("2. Patient found in signup:", patient ? "Yes" : "No");
+            
             if (!patient) {
                 throw new Error("Invalid email or password");
             }
 
-            console.log("2. Patient found, retrieving sensitive data...");
-            if (!patient.ipfsCID || !patient.ipfsIV) {
-                throw new Error("Patient data is incomplete - missing IPFS information");
-            }
-
+            // 2. Password verify karo
+            console.log("3. Retrieving sensitive data...");
             const sensitiveData = await IPFSService.retrieveAndDecrypt(
                 patient.ipfsCID,
                 patient.ipfsIV
             );
 
-            if (!sensitiveData || !sensitiveData.password) {
-                throw new Error("Failed to retrieve or decrypt sensitive data");
-            }
+            console.log("4. Sensitive data retrieved:", sensitiveData ? "Yes" : "No");
+            console.log("5. Comparing passwords...");
+            console.log("Input password length:", password.length);
+            console.log("Stored password hash length:", sensitiveData.password.length);
 
-            console.log("3. Sensitive data retrieved successfully");
+            // Try to hash the input password to compare
+            const hashedInputPassword = await bcrypt.hash(password, 10);
+            console.log("Hashed input password length:", hashedInputPassword.length);
+
             const isPasswordValid = await bcrypt.compare(password, sensitiveData.password);
+            console.log("6. Password valid:", isPasswordValid ? "Yes" : "No");
+
             if (!isPasswordValid) {
                 throw new Error("Invalid email or password");
             }
 
-            // Generate JWT token with role
+            // 3. Phir addpatientModel mein check karo
+            console.log("7. Checking hospital records...");
+            const hospitalPatient = await addpatientModel.findOne({ 
+                email: { $regex: new RegExp(`^${email}$`, 'i') }
+            });
+            
+            console.log("8. Patient found in hospital:", hospitalPatient ? "Yes" : "No");
+            
+            // 4. Token generate karo
             const token = jwt.sign(
-                { 
-                    id: patient._id,
-                    role: 'patient'  // Add role to token
-                },
+                { id: hospitalPatient ? hospitalPatient._id : patient._id, role: 'patient' },
                 process.env.JWT_SECRET,
                 { expiresIn: '30d' }
             );
 
-            // Store token in cookie
-            Cookies.set('patientToken', token, { 
-                expires: 30, // 30 days
-                sameSite: 'strict'
-            });
+            console.log("9. Token generated successfully");
 
             return {
-                patient,
+                patient: hospitalPatient || patient,
                 sensitiveData,
                 token
             };
@@ -226,19 +244,23 @@ const addpatientService = {
         try {
             // Check if patient exists in signup database
             const signedUpPatient = await patientSignup.findOne({
-                fullName: patientData.fullName,
                 email: patientData.email
             });
+            
+            console.log("Patient in signup database:", signedUpPatient ? " Found" : " Not found");
 
-            // For non-admin roles, require patient to exist in signup
-            if (userRole !== 'admin' && !signedUpPatient) {
-                throw new Error("Patient must be signed up first with same full name and email");
+            // If user is not admin, check if email exists in signup
+            if (userRole !== 'admin') {
+                if (!signedUpPatient) {
+                    throw new Error("Patient must be signed up first. Please register before adding patient details.");
+                }
+                console.log("Patient found in signup database");
             }
 
             // Check if already added to addpatientModel
             const existingPatient = await addpatientModel.findOne({ email: patientData.email });
             if (existingPatient) {
-                throw new Error("Patient profile already exists");
+                throw new Error("Patient profile already exists in hospital records");
             }
 
             // Validate required fields and their types
@@ -249,7 +271,6 @@ const addpatientService = {
                 roomNumber: 'number',
                 assignedDoctor: 'string',
                 medicalHistory: 'string',
-                insuranceInformation: 'string'
             };
 
             // Check for missing or invalid fields
@@ -268,12 +289,12 @@ const addpatientService = {
             }
 
             if (errors.length > 0) {
-                throw new Error(`AddPatient validation failed: ${errors.join(', ')}`);
+                throw new Error(`Validation failed: ${errors.join(', ')}`);
             }
 
             // Basic data that will always be included
             let returnData = {
-                fullName: patientData.fullName,
+                fullName: patientData.fullName || signedUpPatient?.fullName,
                 email: patientData.email,
                 medicalCondition: patientData.medicalCondition,
                 admitDate: patientData.admitDate,
@@ -281,11 +302,11 @@ const addpatientService = {
                 roomNumber: parseInt(patientData.roomNumber),
                 assignedDoctor: patientData.assignedDoctor,
                 medicalHistory: patientData.medicalHistory,
-                insuranceInformation: patientData.insuranceInformation
             };
 
             // Only include signup data if patient exists in signup database
             if (signedUpPatient) {
+                console.log("Adding signup data to patient record");
                 returnData = {
                     ...returnData,
                     gender: signedUpPatient.gender,
@@ -305,14 +326,18 @@ const addpatientService = {
                 };
             }
 
+            console.log(" Patient data validation successful");
             return returnData;
         } catch (error) {
+            console.error(" Error in validatePatientData:", error);
             throw error;
         }
     },
 
     savePatient: async (addpatientRequest) => {
         try {
+            console.log("Saving patient data...");
+            
             // Prepare data for IPFS
             const ipfsData = {
                 medicalHistory: addpatientRequest.medicalHistory,
@@ -321,11 +346,11 @@ const addpatientService = {
                 medicalCondition: addpatientRequest.medicalCondition,
                 roomNumber: addpatientRequest.roomNumber,
                 assignedDoctor: addpatientRequest.assignedDoctor,
-                insuranceInformation: addpatientRequest.insuranceInformation
             };
     
-            // Include signupData fields only if signupData exists
+            // Include signupData fields if available
             if (addpatientRequest.signupData) {
+                console.log("Including signup data in IPFS");
                 ipfsData.password = addpatientRequest.signupData.password;
                 ipfsData.walletAddress = addpatientRequest.signupData.walletAddress;
                 ipfsData.phoneNumber = addpatientRequest.signupData.phoneNumber;
@@ -348,16 +373,24 @@ const addpatientService = {
                 roomNumber: parseInt(addpatientRequest.roomNumber),
                 assignedDoctor: addpatientRequest.assignedDoctor,
                 medicalHistory: addpatientRequest.medicalHistory,
-                insuranceInformation: addpatientRequest.insuranceInformation,
                 ipfsCID: cid,
-                ipfsIV: iv
+                ipfsIV: iv,
+                // Include additional fields if available
+                gender: addpatientRequest.gender,
+                dateOfBirth: addpatientRequest.dateOfBirth
             });
     
             // Save patient
             const savedPatient = await patient.save();
-            return savedPatient;
+            console.log(" Patient saved to database");
+
+            return {
+                success: true,
+                message: "Patient added successfully",
+                data: savedPatient
+            };
         } catch (error) {
-            console.error("Service: Error in savePatient:", error);
+            console.error(" Error in savePatient:", error);
             throw error;
         }
     }
@@ -396,36 +429,84 @@ const readAllpatientdata = {
             // Build query based on filters
             let query = {};
             if (filters?.fullName) {
-                query.fullName = { $regex: new RegExp(filters.fullName, 'i') }; // Case-insensitive search
+                query.fullName = { $regex: new RegExp(filters.fullName, 'i') };
             }
 
             console.log('Filter Query:', query);
 
-            // Get all patients from addpatientModel with filters
-            const patients = await addpatientModel.find(query);
-            if (!patients || patients.length === 0) {
-                console.log('No patients found with the given filters');
-                throw new Error("No patients found");
+            try {
+                // Get all patients from both collections
+                const [addedPatients, signupPatients] = await Promise.all([
+                    // Get patients from addpatientModel
+                    addpatientModel.find(query).lean(),  // Using .lean() for better performance
+                    // Get patients from patientSignup who are not in addpatientModel
+                    patientSignup.find(query).lean()     // Using .lean() for better performance
+                ]);
+
+                // Create a set of emails from addedPatients for quick lookup
+                const addedPatientsEmails = new Set(addedPatients.map(p => p.email));
+
+                // Filter signup patients to only include those not in addpatientModel
+                const uniqueSignupPatients = signupPatients.filter(p => !addedPatientsEmails.has(p.email));
+
+                // Format added patients data
+                const formattedAddedPatients = addedPatients.map(patient => ({
+                    _id: patient._id.toString(), // Convert ObjectId to string
+                    name: patient.fullName,
+                    email: patient.email,
+                    admitDate: patient.admitDate || "Not Available",
+                    condition: patient.medicalCondition || "Not Available",
+                    room: patient.roomNumber || "Not Assigned",
+                    doctor: patient.assignedDoctor || "Not Assigned",
+                    isAdded: true // Flag to indicate this patient is in addpatientModel
+                }));
+
+                // Format signup patients data
+                const formattedSignupPatients = uniqueSignupPatients.map(patient => ({
+                    _id: patient._id.toString(), // Convert ObjectId to string
+                    name: patient.fullName,
+                    email: patient.email,
+                    admitDate: "Not Admitted",
+                    condition: "Not Specified",
+                    room: "Not Assigned",
+                    doctor: "Not Assigned",
+                    isAdded: false // Flag to indicate this patient is only in signup
+                }));
+
+                // Combine both arrays
+                const allPatients = [...formattedAddedPatients, ...formattedSignupPatients];
+
+                // Return empty array with message if no patients found
+                if (allPatients.length === 0) {
+                    return {
+                        success: true,
+                        data: [],
+                        message: "No patients found"
+                    };
+                }
+
+                return {
+                    success: true,
+                    data: allPatients,
+                    message: "Patients retrieved successfully"
+                };
+
+            } catch (error) {
+                console.error("Error in database operations:", error);
+                return {
+                    success: false,
+                    data: [],
+                    message: error.message || "Error retrieving patients data"
+                };
             }
 
-            console.log(`Found ${patients.length} patients`);
-
-            // Get IPFS data for each patient
-            const patientsWithData = await Promise.all(patients.map(async (patient) => {
-                const ipfsData = await IPFSService.retrieveAndDecrypt(
-                    patient.ipfsCID,
-                    patient.ipfsIV
-                );
-                return {
-                    patient,
-                    ipfsData
-                };
-            }));
-
-            return patientsWithData;
         } catch (error) {
             console.error("Service: Error in readAllpatientdata:", error);
-            throw error;
+            return {
+                success: false,
+                data: [],
+                message: error.message || "Error processing patient data"
+            };
         }
     }
 };
@@ -519,6 +600,150 @@ const deletePatientService = {
         }
     }
 };
+//new to check
+const addPrimaryDoctor = async (patientId, doctorId) => {
+    try {
+        const patient = await AddPatient.findById(patientId);
+        if (!patient) {
+            throw new Error('Patient not found');
+        }
+
+        const doctor = await Doctor.findById(doctorId);
+        if (!doctor) {
+            throw new Error('Doctor not found');
+        }
+
+        patient.primaryDoctor = doctorId;
+        await patient.save();
+        
+        return {
+            success: true,
+            message: 'Primary doctor assigned successfully'
+        };
+    } catch (error) {
+        throw new Error(`Error assigning primary doctor: ${error.message}`);
+    }
+};
+
+const patientService = {
+    getPatientAppointments: async (patientId) => {
+        try {
+            // Verify patient exists
+            const patient = await addpatientModel.findById(patientId);
+            if (!patient) {
+                throw new Error("Patient not found");
+            }
+
+            // Get all appointments for the patient
+            const appointments = await appointmentModel.find({ patientId })
+                .populate('doctorId', 'fullName specialization')
+                .sort({ appointmentDate: 1, appointmentTime: 1 });
+
+            return {
+                success: true,
+                message: "Patient appointments fetched successfully",
+                data: {
+                    patient: {
+                        id: patient._id,
+                        name: patient.fullName,
+                        email: patient.email
+                    },
+                    appointments: appointments,
+                    totalAppointments: appointments.length
+                }
+            };
+        } catch (error) {
+            console.log("Error in getPatientAppointments:", error.message);
+            throw error;
+        }
+    },
+
+    getPatientDashboardData: async (patientId) => {
+        try {
+           const appointments = await appointmentModel.find({ patientId })
+                .populate('doctorId', 'fullName specialization email experience availability profileimage')
+                .sort({ appointmentDate: -1, appointmentTime: -1 });
+
+            // 2. Total appointments
+            // const totalAppointments = appointments.length;
+            const totalAppointments = await appointmentModel.countDocuments({ patientId });
+
+          const recentAppointments = appointments.slice(0, 4).map(app => ({
+                doctorName: app.doctorId?.fullName,
+                date: app.appointmentDate,
+                time: app.appointmentTime
+            }));
+
+            // 4. Primary doctor (from most recent appointment)
+            const primaryDoctor = appointments[0]?.doctorId || null;
+
+            // 5. Static medical records
+            const medicalRecords = 8;
+
+            return {
+                totalAppointments,
+                medicalRecords,
+                recentAppointments,
+                primaryDoctor
+            };
+        } catch (error) {
+            console.error("Error in getPatientDashboardData:", error);
+            throw error;
+        }
+    }
+};
+
+const getAllPatients = async () => {
+    try {
+        // Get all patients from addpatientModel
+        const patients = await addpatientModel.find({});
+
+        if (!patients || patients.length === 0) {
+            return {
+                success: true,
+                data: [],
+                message: 'No patients found. Please add a patient to initialize the system.'
+            };
+        }
+
+        // Get IPFS data for each patient
+        const patientsWithData = await Promise.all(patients.map(async (patient) => {
+            try {
+                if (patient.ipfsCID && patient.ipfsCID !== 'defaultCID') {
+                    const ipfsData = await IPFSService.retrieveAndDecrypt(
+                        patient.ipfsCID,
+                        patient.ipfsIV
+                    );
+                    return {
+                        ...patient.toObject(),
+                        sensitiveData: ipfsData
+                    };
+                }
+                return patient.toObject();
+            } catch (error) {
+                console.error(`Error retrieving IPFS data for patient ${patient._id}:`, error);
+                return patient.toObject();
+            }
+        }));
+
+        return {
+            success: true,
+            data: patientsWithData,
+            message: 'Patients retrieved successfully'
+        };
+
+    } catch (error) {
+        console.error('Error in getAllPatients:', error);
+        if (error.message.includes('defaultCID')) {
+            return {
+                success: true,
+                data: [],
+                message: 'No patients found. Please add a patient to initialize the system.'
+            };
+        }
+        throw error;
+    }
+};
 
 module.exports = {
     patientSignupService,
@@ -527,5 +752,8 @@ module.exports = {
     readpatientdataByName,
     readAllpatientdata,
     updatePatientService,
-    deletePatientService
+    deletePatientService,
+    addPrimaryDoctor,
+    patientService,
+    getAllPatients
 };

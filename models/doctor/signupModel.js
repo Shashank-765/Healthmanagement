@@ -58,7 +58,7 @@ const doctorSignupSchema = new mongoose.Schema({
     password: {
         type: String,
         required: [true, 'Password is required'],
-        minlength: [6, 'Password must be at least 6 characters long']
+        minlength: [8, 'Password must be at least 8 characters long']
     },
     medicalDocument: {
         type: String, // This will store the path to the uploaded file
@@ -72,17 +72,13 @@ const doctorSignupSchema = new mongoose.Schema({
         enum: [
             'Cardiology',
             'Dermatology',
-            'Endocrinology',
-            'Gastroenterology',
-            'General Medicine',
             'Neurology',
-            'Oncology',
+            'ENT',
+            'General Medicine',
+            'Gastroenterology',
             'Orthopedics',
+            'Oncology',
             'Pediatrics',
-            'Psychiatry',
-            'Radiology',
-            'Surgery',
-            'Urology'
         ]
     },
     medicalLicenseNumber: {

@@ -4,15 +4,21 @@ const Cookies = require('js-cookie');
 const authMiddleware = {
     authenticateToken: (req, res, next) => {
         try {
+            // Debug logs
+            console.log('Headers received:', req.headers);
+            console.log('Cookies received:', req.cookies);
+
             // Check for token in Authorization header
             const authHeader = req.headers.authorization;
             let token;
 
             if (authHeader) {
                 token = authHeader.split(' ')[1];
+                console.log('Token from Authorization header:', token);
             } else {
                 // Check for token in cookies
                 token = req.cookies?.adminToken;
+                console.log('Token from cookies:', token);
             }
 
             if (!token) {
@@ -36,11 +42,11 @@ const authMiddleware = {
             req.user = decoded;
             next();
         } catch (error) {
-            console.error("Token verification error:", error);
+            console.error('Detailed middleware error:', error);
             return res.status(401).json({
                 statusCode: 401,
                 success: false,
-                message: "Invalid token"
+                message: error.message || "Invalid token"
             });
         }
     }

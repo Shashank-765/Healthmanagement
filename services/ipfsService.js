@@ -27,6 +27,11 @@ class IPFSService {
 
     async retrieveAndDecrypt(cid, iv) {
         try {
+            // Check if CID is valid
+            if (!cid || cid === 'defaultCID' || cid === '') {
+                return { success: true, data: [] }; // Return empty array for new/uninitialized collections
+            }
+
             // Get from IPFS
             const stream = this.ipfs.cat(cid);
             let chunks = [];
@@ -41,7 +46,11 @@ class IPFSService {
             return await encryptionService.decrypt(parsed.encryptedData, iv);
         } catch (error) {
             console.error('IPFS retrieval error:', error);
-            throw new Error('Failed to retrieve from IPFS');
+            // Return empty array instead of throwing error for defaultCID
+            if (error.message.includes('defaultCID')) {
+                return { success: true, data: [] };
+            }
+            throw error;
         }
     }
 }

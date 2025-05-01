@@ -1,5 +1,5 @@
 const express = require('express');
-const { patientSignupService, patientLoginService, addpatientService, readpatientdataByName, readAllpatientdata, updatePatientService, deletePatientService } = require('../../services/patientservices');
+const { patientSignupService, patientLoginService, addpatientService, readpatientdataByName, readAllpatientdata, updatePatientService, deletePatientService, createAppointment, patientService } = require('../../services/patientservices');
 const upload = require('../../utils/multer');
 const patientLogin = require('../../models/patient/loginModel');
 const IPFSService = require('../../services/ipfsService');
@@ -84,22 +84,12 @@ module.exports = {
 
     patientLogin: async (req, res) => {
         try {
-            console.log("Controller: Starting login process...");
             const { email, password } = req.body;
 
-            if (!email || !password) {
-                console.log("Controller: Missing email or password");
-                return res.status(400).json({
-                    statusCode: 400,
-                    message: "Email and password are required"
-                });
-            }
-
-            console.log("Controller: Calling validateLogin service...");
+            // Login validate karo
             const { patient, sensitiveData, token } = await patientLoginService.validateLogin(email, password);
-            console.log("Controller: Login validation successful");
 
-            // Save login data with token
+            // Login data save karo
             const loginData = {
                 email: patient.email,
                 password: sensitiveData.password,
@@ -107,23 +97,21 @@ module.exports = {
                 lastLogin: new Date()
             };
 
-            // Save or update login record with token
+            // Login record update karo
             const savedLogin = await patientLogin.findOneAndUpdate(
                 { email: patient.email },
                 loginData,
                 { upsert: true, new: true }
             );
 
-            console.log("Controller: Login data saved successfully");
-
-            console.log("Controller: Sending response...");
+            // Response bhejo
             res.status(200).json({
                 statusCode: 200,
                 message: "Patient login successful",
                 data: {
                     _id: patient._id,
                     email: patient.email,
-                    token: savedLogin.token // Use the saved token
+                    token: savedLogin.token
                 }
             });
 
@@ -171,23 +159,25 @@ module.exports = {
 
     addPatient: async (req, res) => {
         try {
-            // Get token from header or cookies
-            let token = req.headers.authorization?.split(' ')[1];
-            if (!token) {
-                // Check for token in cookies
-                token = req.cookies?.adminToken || req.cookies?.patientToken;
+            let userRole = 'patient'; // Default role
+
+            // Check for token (optional now)
+            const token = req.headers.authorization?.split(' ')[1] || 
+                         req.cookies?.adminToken || 
+                         req.cookies?.patientToken;
+
+            // If token exists, verify it to get role
+            if (token) {
+                try {
+                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    userRole = decoded.role;
+                    console.log("Token verified, user role:", userRole);
+                } catch (error) {
+                    console.log("Token verification failed, proceeding as patient");
+                }
             }
 
-            if (!token) {
-                return res.status(401).json({
-                    success: false,
-                    message: "No token provided"
-                });
-            }
-
-            // Verify token and get user role
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            const userRole = decoded.role;
+            console.log("Processing request with role:", userRole);
 
             // Create patient data object
             const patientData = {
@@ -199,12 +189,18 @@ module.exports = {
                 roomNumber: req.body.roomNumber,
                 assignedDoctor: req.body.assignedDoctor,
                 medicalHistory: req.body.medicalHistory,
-                insuranceInformation: req.body.insuranceInformation,
                 // profileimage: req.file.path // Use the uploaded file path
             };
 
+            // Add profile image if uploaded
+            if (req.file) {
+                patientData.profileimage = req.file.path;
+            }
+
+            console.log("Validating patient data...");
             // Validate and create patient with user role
             const validatedData = await addpatientService.validatePatientData(patientData, userRole);
+            console.log("Data validated, saving patient...");
             const patient = await addpatientService.savePatient(validatedData);
 
             // Send success response
@@ -245,12 +241,9 @@ module.exports = {
                 });
             }
 
-            // Handle token errors
+            // Handle token errors - but don't return 401 since token is optional
             if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-                return res.status(401).json({
-                    success: false,
-                    message: "Invalid or expired token"
-                });
+                console.log("Token error, proceeding as regular patient");
             }
 
             // Handle other errors
@@ -323,7 +316,6 @@ module.exports = {
                     medicalCondition: ipfsData.medicalCondition,
                     roomNumber: ipfsData.roomNumber,
                     assignedDoctor: ipfsData.assignedDoctor,
-                    insuranceInformation: ipfsData.insuranceInformation,
                     profileimage: ipfsData.profileimage,
                     createdAt: patient.createdAt,
                     updatedAt: patient.updatedAt
@@ -347,50 +339,32 @@ module.exports = {
             console.log('Received filters:', filters);
 
             // Get all patients data from service with filters
-            const patientsData = await readAllpatientdata.readAllpatientdata(filters);
+            const result = await readAllpatientdata.readAllpatientdata(filters);
 
-            // Format the response
-            const formattedPatients = patientsData.map(({ patient, ipfsData }) => ({
-                _id: patient._id,
-                fullName: patient.fullName,
-                email: patient.email,
-                medicalDocument: patient.medicalDocument,
-                // Include sensitive data from IPFS
-                admitDate: ipfsData.admitDate,
-                medicalCondition: ipfsData.medicalCondition,
-                roomNumber: ipfsData.roomNumber,
-                assignedDoctor: ipfsData.assignedDoctor,
-                insuranceInformation: ipfsData.insuranceInformation,
-                profileimage: ipfsData.profileimage,
-                createdAt: patient.createdAt,
-                updatedAt: patient.updatedAt
-            }));
+            // Check if the operation was successful
+            if (!result.success) {
+                return res.status(400).json(result);
+            }
 
+            // Return the result directly since it's already formatted in the service
             return res.status(200).json({
                 success: true,
-                message: "All patients data retrieved successfully",
-                count: formattedPatients.length,
-                data: formattedPatients
+                message: result.message,
+                count: result.data.length,
+                data: result.data
             });
+
         } catch (error) {
             console.error("Controller: Error in readAllpatientdata:", error);
             
-            // Handle specific error cases
-            if (error.message === "No patients found") {
-                return res.status(200).json({
-                    success: true,
-                    message: "No patients found with the given filters",
-                    count: 0,
-                    data: []
-                });
-            }
-
             return res.status(500).json({
                 success: false,
                 message: error.message || "Error retrieving patients data"
             });
         }
     },
+   
+  
     updatePatientData: async (req, res) => {
         try {
             const { fullName } = req.params;
@@ -454,6 +428,37 @@ module.exports = {
             return res.status(500).json({
                 success: false,
                 message: error.message || "Error deleting patient data"
+            });
+        }
+    },
+    assignPrimaryDoctor: async (req, res) => {
+        try {
+            const { patientId, doctorId } = req.body;
+            
+            const result = await patientService.addPrimaryDoctor(patientId, doctorId);
+            
+            res.status(200).json(result);
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }, 
+    getPatientDashboard: async (req, res) => {
+        try {
+            const patientId = req.user.id;
+            const dashboardData = await patientService.getPatientDashboardData(patientId);
+
+            res.status(200).json({
+                success: true,
+                message: "Patient dashboard data fetched successfully",
+                data: dashboardData
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message || "Failed to fetch dashboard data"
             });
         }
     }

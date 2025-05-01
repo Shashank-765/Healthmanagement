@@ -3,7 +3,8 @@ const bcrypt = require('bcryptjs');
 const doctorSignup = require('../../models/doctor/signupModel');
 const doctorLogin = require('../../models/doctor/loginModel');
 const adddoctorModel = require('../../models/doctor/adddoctorModel');
-const { doctorSignupService, doctorLoginService, createdDoctor, doctorManagementService } = require('../../services/doctorservice');
+const appointmentModel = require('../../models/appointment/appointmentModel');
+const { doctorSignupService, doctorLoginService, createdDoctor, doctorManagementService, getDoctorDashboardData } = require('../../services/doctorservice');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 
@@ -82,15 +83,7 @@ module.exports = {
 
             // Validate login credentials
             const doctor = await doctorLoginService.validateLogin(email, password);
-
-            // If login successful, create login record if it doesn't exist
-            const existingLogin = await doctorLogin.findOne({ email });
-            if (!existingLogin) {
-                await doctorLogin.create({
-                    email: doctor.email,
-                    password: doctor.password
-                });
-            }
+            console.log(doctor, "<<<===doctor");
 
             // Generate token with role
             const token = jwt.sign(
@@ -100,6 +93,19 @@ module.exports = {
                 },
                 process.env.JWT_SECRET,
                 { expiresIn: '30d' }
+            );
+
+            // If login successful, create or update login record
+            const loginData = {
+                email: doctor.email,
+                password: doctor.password,
+                token: token
+            };
+
+            await doctorLogin.findOneAndUpdate(
+                { email: doctor.email },
+                loginData,
+                { upsert: true, new: true }
             );
 
             // Send success response
@@ -112,7 +118,6 @@ module.exports = {
                     token
                 }
             });
-
         } catch (error) {
             console.error('Doctor login error:', error);
             const statusCode = error.message.includes("Invalid") ? 401 : 500;
@@ -298,6 +303,116 @@ module.exports = {
             console.error('Error in deleteDoctor controller:', error);
             const statusCode = error.message.includes("not found") ? 404 : 500;
             return res.status(statusCode).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    },
+
+    assignPatientToDoctor: async (req, res) => {
+        try {
+            const { doctorId, patientId } = req.body;
+            
+            const result = await doctorManagementService.addPatientToDoctor(doctorId, patientId);
+            
+            res.status(200).json(result);
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    },
+
+    getDoctorDashboard: async (req, res) => {
+        try {
+            const doctorId = req.params.doctorId || req.user?.id;
+
+            // Check if doctorId is provided
+            if (!doctorId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Doctor ID is required"
+                });
+            }
+
+            // First check in signup collection
+            let doctor = await doctorSignup.findById(doctorId);
+            
+            // If not found in signup, check in adddoctor collection
+            if (!doctor) {
+                doctor = await adddoctorModel.findById(doctorId);
+            }
+
+            // If doctor not found in either collection
+            if (!doctor) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Doctor not found"
+                });
+            }
+
+            const dashboardData = await getDoctorDashboardData(doctorId);
+            
+            res.status(200).json(dashboardData);
+        } catch (error) {
+            console.error('Error in getDoctorDashboard:', error);
+            
+            // Handle specific MongoDB ObjectId casting error
+            if (error.name === 'CastError' && error.kind === 'ObjectId') {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid doctor ID format"
+                });
+            }
+
+            res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    },
+
+    addAppointmentToDoctor: async (req, res) => {
+        try {
+            const { doctorId, appointmentId } = req.body;
+            
+            const result = await doctorManagementService.addAppointmentToDoctor(doctorId, appointmentId);
+            
+            res.status(200).json(result);
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    },
+
+    readDoctorsByEmail: async (req, res) => {
+        try {
+            const { email } = req.params;
+            
+            // First check in signup collection
+            const signupDoctor = await doctorSignup.findOne({ email });
+            
+            // Then check in adddoctor collection
+            const addDoctor = await adddoctorModel.findOne({ email });
+
+            if (!signupDoctor && !addDoctor) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Doctor not found in any collection"
+                });
+            }
+
+            // Return the doctor data
+            return res.status(200).json({
+                success: true,
+                data: signupDoctor || addDoctor
+            });
+        } catch (error) {
+            console.error('Error in readDoctorsByEmail:', error);
+            return res.status(500).json({
                 success: false,
                 message: error.message || "Internal server error"
             });

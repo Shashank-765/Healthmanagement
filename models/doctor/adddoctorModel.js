@@ -68,8 +68,34 @@ const adddoctorSchema = new mongoose.Schema({
     ipfsIV: {
         type: String,
         trim: true
+    },
+    patients: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AddPatient'
+    }],
+    appointments: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Appointment'
+    }],
+    department: {
+        type: String,
+        required: false
     }
 },{timestamps:true});
+
+adddoctorSchema.methods.addPatient = async function(patientId) {
+    if (!this.patients.includes(patientId)) {
+        this.patients.push(patientId);
+        await this.save();
+    }
+};
+
+adddoctorSchema.methods.addAppointment = async function(appointmentId) {
+    if (!this.appointments.includes(appointmentId)) {
+        this.appointments.push(appointmentId);
+        await this.save();
+    }
+};
 
 const adddoctor = mongoose.model("adddoctor",adddoctorSchema);
 module.exports = adddoctor;

@@ -7,7 +7,10 @@ require('dotenv').config();
 const patientRoute = require("./routes/patientRoute");
 const doctorRoute = require("./routes/doctorRoute");
 const adminRoute = require("./routes/adminRoute");
+const appointmentRoute = require("./routes/appointmentRoute");
 const authMiddleware = require("./middleware/middleware");
+const medicalHistoryRoutes = require("./routes/medicalHistoryRoutes");
+const insuranceRoute = require("./routes/insuranceRoute");
 const path = require('path');
 const fs = require('fs');
 
@@ -38,9 +41,13 @@ if (!fs.existsSync('uploads')) {
     fs.mkdirSync('uploads');
 }
 
+// Mount routes
 app.use('/api/v1/patient', patientRoute);
 app.use('/api/v1/doctor', doctorRoute);
 app.use('/api/v1/admin', adminRoute);
+app.use('/api/v1/appointment', appointmentRoute);
+app.use('/api/v1/medical-history', medicalHistoryRoutes);
+app.use('/api/v1/insurance', insuranceRoute);
 
 const PORT = process.env.PORT || 5000;
 

@@ -42,10 +42,6 @@ const addpatientSchema = new mongoose.Schema({
         type: String,
         required: [true, 'Medical history is required']
     },
-    insuranceInformation: {
-        type: String,
-        required: true
-    },
     ipfsCID: {
         type: String,
         required: true
@@ -53,6 +49,14 @@ const addpatientSchema = new mongoose.Schema({
     ipfsIV: {
         type: String,
         required: true
+    },
+    appointments: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Appointment'
+    }],
+    primaryDoctor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Doctor'
     }
 }, { timestamps: true });
 

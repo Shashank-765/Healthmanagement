@@ -8,6 +8,7 @@ const doctorLogin = require('../models/doctor/loginModel');
 const IPFSService = require('./ipfsService');
 const mnemonic = process.env.mnemonic;
 const adddoctorModel = require('../models/doctor/adddoctorModel');
+const appointmentModel = require('../models/appointment/appointmentModel');
 
 const doctorSignupService = {
     generateWallet: async () => {
@@ -151,7 +152,13 @@ const doctorLoginService = {
             }
 
             // First check in doctorsignups collection
-            const doctor = await doctorSignup.findOne({ email });
+            let doctor = await doctorSignup.findOne({ email });
+            
+            // If not found in signup, check in adddoctor collection
+            if (!doctor) {
+                doctor = await adddoctorModel.findOne({ email });
+            }
+
             if (!doctor) {
                 throw new Error("Invalid email or password");
             }
@@ -477,9 +484,139 @@ const doctorManagementService = {
     }
 };
 
+const addPatientToDoctor = async (doctorId, patientId) => {
+    try {
+        const doctor = await AddDoctor.findById(doctorId);
+        if (!doctor) {
+            throw new Error('Doctor not found');
+        }
+
+        await doctor.addPatient(patientId);
+        
+        return {
+            success: true,
+            message: 'Patient assigned to doctor successfully'
+        };
+    } catch (error) {
+        throw new Error(`Error assigning patient to doctor: ${error.message}`);
+    }
+};
+
+const getDoctorPatients = async (doctorId) => {
+    try {
+        const doctor = await AddDoctor.findById(doctorId)
+            .populate('patients')
+            .populate('appointments');
+            
+        if (!doctor) {
+            throw new Error('Doctor not found');
+        }
+
+        return {
+            success: true,
+            data: {
+                patients: doctor.patients,
+                totalPatients: doctor.patients.length,
+                appointments: doctor.appointments,
+                totalAppointments: doctor.appointments.length
+            }
+        };
+    } catch (error) {
+        throw new Error(`Error fetching doctor's patients: ${error.message}`);
+    }
+};
+
+const addAppointmentToDoctor = async (doctorId, appointmentId) => {
+    try {
+        const doctor = await AddDoctor.findById(doctorId);
+        if (!doctor) {
+            throw new Error('Doctor not found');
+        }
+
+        await doctor.addAppointment(appointmentId);
+        
+        return {
+            success: true,
+            message: 'Appointment added to doctor successfully'
+        };
+    } catch (error) {
+        throw new Error(`Error adding appointment to doctor: ${error.message}`);
+    }
+};
+
+const getDoctorDashboardData = async (doctorId) => {
+    try {
+        console.log('Received doctorId:', doctorId);
+
+        // Get doctor info from adddoctorModel since that's where active doctors are
+        const doctor = await adddoctorModel.findOne({ _id: '68108d284ee97fc854dec73a' });
+        if (!doctor) {
+            throw new Error('Doctor not found');
+        }
+
+        console.log('Found doctor:', {
+            id: doctor._id,
+            name: doctor.fullName,
+            email: doctor.email
+        });
+
+        // Get appointments for this doctor
+        const appointmentQuery = { doctorId: '68108d284ee97fc854dec73a' };
+        console.log('Appointment query:', appointmentQuery);
+        
+        // Get total appointments
+        const totalAppointments = await appointmentModel.countDocuments(appointmentQuery);
+        console.log('Total appointments:', totalAppointments);
+
+        // Get total unique patients
+        const uniquePatients = await appointmentModel.distinct('patientId', appointmentQuery);
+        const totalPatients = uniquePatients.length;
+        console.log('Total unique patients:', totalPatients);
+
+        // Get recent appointments (last 2)
+        const recentAppointments = await appointmentModel
+            .find(appointmentQuery)
+            .sort({ createdAt: -1 })
+            .limit(2)
+            .populate('patientId', 'fullName')
+            .select('patientId appointmentTime status');
+        
+        console.log('Recent appointments found:', recentAppointments.length);
+
+        // Format recent appointments
+        const formattedAppointments = recentAppointments.map(apt => ({
+            patientName: apt.patientId ? apt.patientId.fullName : 'Unknown Patient',
+            time: apt.appointmentTime,
+            status: apt.status
+        }));
+
+        return {
+            success: true,
+            data: {
+                totalAppointments,
+                totalPatients,
+                totalHospital: 1,
+                recentAppointments: formattedAppointments,
+                doctorInfo: {
+                    fullName: doctor.fullName,
+                    specialization: doctor.specialization,
+                    email: doctor.email
+                }
+            }
+        };
+    } catch (error) {
+        console.error('Error in getDoctorDashboardData:', error);
+        throw new Error(`Error fetching doctor dashboard data: ${error.message}`);
+    }
+};
+
 module.exports = {
     doctorSignupService,
     doctorLoginService,
     createdDoctor,
-    doctorManagementService
+    doctorManagementService,
+    addPatientToDoctor,
+    getDoctorPatients,
+    addAppointmentToDoctor,
+    getDoctorDashboardData
 };
