@@ -2,7 +2,6 @@
 const express = require('express');
 const router = express.Router();
 const appointmentController = require('../controller/appointment/appointmentController');
-const auth = require('../middleware/auth');
 const { authenticateToken } = require('../middleware/middleware');
 
 // Create appointment
@@ -45,11 +44,6 @@ router.get('/doctors/all',
     appointmentController.getAllDoctors
 );
 
-// Get doctor's appointments by name
-router.get('/appointments/:fullName',
-    authenticateToken,
-    appointmentController.getDoctorTotalAppointments
-);
 
 // Update appointment status (doctor/admin only)
 router.patch('/update-status',
@@ -72,5 +66,8 @@ router.post('/cancel-appointment',
     },
     appointmentController.cancelAppointment
 );
+
+// Add this route for "my appointments" (doctor only) (total appointments on doctor dashboard)
+router.get('/my-appointments', authenticateToken, appointmentController.getDoctorOwnAppointments);
 
 module.exports = router;

@@ -2,7 +2,7 @@ const express = require('express');
 const { patientSignupService, patientLoginService, addpatientService, readpatientdataByName, readAllpatientdata, updatePatientService, deletePatientService, createAppointment, patientService } = require('../../services/patientservices');
 const upload = require('../../utils/multer');
 const patientLogin = require('../../models/patient/loginModel');
-const IPFSService = require('../../services/ipfsService');
+const IPFSService = require('../../services/ipfsService'); 
 const patientSignup = require('../../models/patient/signupModel');
 const doctorSignup = require('../../models/doctor/signupModel');
 const encryptionService = require('../../utils/encryptdecrypt');
@@ -363,8 +363,6 @@ module.exports = {
             });
         }
     },
-   
-  
     updatePatientData: async (req, res) => {
         try {
             const { fullName } = req.params;

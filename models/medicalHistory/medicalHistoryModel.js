@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const medicalHistorySchema = new mongoose.Schema({
     patientId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'addpatient',
+        ref: 'AddPatient',
         required: true
     },
     doctorId: {
@@ -13,27 +13,18 @@ const medicalHistorySchema = new mongoose.Schema({
     },
     date: {
         type: Date,
+        default: Date.now
     },
     condition: {
         type: String,
-    },
-    medications: {
-        type: String,
-    },
-    followUpDate: {
-        type: Date,
+        required: true
     },
     notes: {
         type: String,
+        required: true
     },
     department: {
         type: String,
-    },
-    visitTime: {
-        type: String,
-    },
-    recoveryDate: {
-        type: Date
     }
 }, {
     timestamps: true

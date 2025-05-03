@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const Cookies = require('js-cookie');
 const patientSignup = require('../models/patient/signupModel');
 const patientLogin = require('../models/patient/loginModel');
-const IPFSService = require('./ipfsService');
+const IPFSService = require('../services/ipfsService');
 const mnemonic = process.env.mnemonic;
 const addpatientModel = require('../models/patient/addpatientModel');
 const AddDoctorModel = require('../models/doctor/adddoctorModel');
@@ -660,25 +660,26 @@ const patientService = {
 
     getPatientDashboardData: async (patientId) => {
         try {
-           const appointments = await appointmentModel.find({ patientId })
+            // Get all appointments for the patient, sorted by most recent
+            const appointments = await appointmentModel.find({ patientId })
                 .populate('doctorId', 'fullName specialization email experience availability profileimage')
                 .sort({ appointmentDate: -1, appointmentTime: -1 });
 
-            // 2. Total appointments
-            // const totalAppointments = appointments.length;
-            const totalAppointments = await appointmentModel.countDocuments({ patientId });
+            // Total appointments
+            const totalAppointments = appointments.length;
 
-          const recentAppointments = appointments.slice(0, 4).map(app => ({
+            // Get recent appointments with doctor name, date, and time
+            const recentAppointments = appointments.slice(0, 4).map(app => ({
                 doctorName: app.doctorId?.fullName,
                 date: app.appointmentDate,
                 time: app.appointmentTime
             }));
 
-            // 4. Primary doctor (from most recent appointment)
+            // Primary doctor (from most recent appointment)
             const primaryDoctor = appointments[0]?.doctorId || null;
 
-            // 5. Static medical records
-            const medicalRecords = 8;
+            // **Dynamic medical records count**
+            const medicalRecords = await medicalHistoryModel.countDocuments({ patientId });
 
             return {
                 totalAppointments,

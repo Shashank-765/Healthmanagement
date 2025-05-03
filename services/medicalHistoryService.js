@@ -272,6 +272,26 @@ const medicalHistoryService = {
             console.log("Error fetching all medical history:", error.message);
             throw error;
         }
+    },
+
+    getMedicalHistoryById: async (id) => {
+        return await medicalHistoryModel.findById(id);
+    },
+
+    editMedicalHistory: async (id, updateData) => {
+        // Only allow updating condition and notes
+        const allowed = {};
+        if (updateData.condition !== undefined) allowed.condition = updateData.condition;
+        if (updateData.notes !== undefined) allowed.notes = updateData.notes;
+
+        const updated = await medicalHistoryModel.findByIdAndUpdate(
+            id,
+            { $set: allowed },
+            { new: true }
+        )
+        .populate('patientId', 'fullName email')
+        .populate('doctorId', 'fullName specialization');
+        return updated;
     }
 };
 

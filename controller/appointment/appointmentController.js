@@ -1,12 +1,14 @@
 const appointmentModel = require('../../models/appointment/appointmentModel');
 const appointmentService = require('../../services/appointmentService');
 const adddoctorModel = require('../../models/doctor/adddoctorModel');
+const addpatientModel = require('../../models/patient/addpatientModel');
+const IPFSService = require('../../services/ipfsService');
 const appointmentController = {
     createAppointment: async (req, res) => {
         try {
             const { department, doctorId, appointmentDate, appointmentTime, reason } = req.body;
             const patientId = req.user.id;
-            const patientEmail = req.user.email;
+            const patientEmail = req.user.email.toLowerCase();
 
             console.log('Creating appointment with data:', {
                 patientId,
@@ -25,8 +27,8 @@ const appointmentController = {
                 });
             }
 
-            // Validate appointmentTime format (HH:MM AM/PM)
-            const timeRegex = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/i;
+            // Enhanced time format validation
+            const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM|am|pm)$/;
             if (!timeRegex.test(appointmentTime)) {
                 return res.status(400).json({
                     success: false,
@@ -34,12 +36,17 @@ const appointmentController = {
                 });
             }
 
-            // Optional: Validate appointmentDate format (ensure it's a valid date)
-            const parsedDate = new Date(appointmentDate);
-            if (isNaN(parsedDate.getTime())) {
+            // Format time to ensure consistent format (e.g., "10:30 AM")
+            const [time, period] = appointmentTime.split(/\s+/);
+            const [hours, minutes] = time.split(':');
+            const formattedTime = `${hours.padStart(2, '0')}:${minutes} ${period.toUpperCase()}`;
+
+            // Validate and format date
+            const appointmentDateObj = new Date(appointmentDate);
+            if (isNaN(appointmentDateObj.getTime())) {
                 return res.status(400).json({
                     success: false,
-                    message: 'appointmentDate must be a valid date',
+                    message: 'Invalid appointment date format. Please use YYYY-MM-DD format.',
                 });
             }
 
@@ -52,55 +59,64 @@ const appointmentController = {
                 });
             }
 
-            const result = await appointmentService.createAppointment({
-                patientId,
-                patientEmail,
-                doctorId,
-                doctorEmail: doctor.email.toLowerCase(), // Store doctor's email
+            // Prepare sensitive data for IPFS
+            const sensitiveData = {
                 department,
                 appointmentDate,
                 appointmentTime,
                 reason,
+                createdAt: new Date(),
+            };
+
+            // Upload to IPFS
+            const ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
+
+            // Create appointment with all required MongoDB data and IPFS references
+            const appointment = new appointmentModel({
+                patientId,
+                patientEmail,
+                doctorId,
+                doctorEmail: doctor.email.toLowerCase(),
+                appointmentDate,
+                appointmentTime: formattedTime,
+                status: 'pending',
+                ipfsCID: ipfsResult.cid,
+                ipfsIV: ipfsResult.iv
             });
 
-            res.status(201).json(result);
+            await appointment.save();
+
+            // Update references in patient and doctor documents
+            await addpatientModel.findByIdAndUpdate(patientId, {
+                $push: { appointments: appointment._id }
+            });
+
+            await adddoctorModel.findByIdAndUpdate(doctorId, {
+                $push: { appointments: appointment._id }
+            });
+
+            res.status(201).json({
+                success: true,
+                message: 'Appointment created successfully',
+                data: {
+                    appointmentId: appointment._id,
+                    patientEmail: appointment.patientEmail,
+                    doctorEmail: appointment.doctorEmail,
+                    status: appointment.status,
+                    appointmentDetails: {
+                        department,
+                        appointmentDate,
+                        appointmentTime,
+                        reason
+                    }
+                }
+            });
+
         } catch (error) {
-            console.log('Appointment creation error:', {
-                message: error.message,
-                stack: error.stack,
-            });
-
-            if (error.message.includes('Patient not found')) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Patient not found in hospital records. Please ensure you are registered.',
-                });
-            }
-
-            if (error.message.includes('Doctor not found')) {
-                return res.status(404).json({
-                    success: false,
-                    message: error.message,
-                });
-            }
-
-            if (error.message.includes('already booked')) {
-                return res.status(400).json({
-                    success: false,
-                    message: error.message,
-                });
-            }
-
-            if (error.name === 'ValidationError') {
-                return res.status(400).json({
-                    success: false,
-                    message: Object.values(error.errors).map((err) => err.message).join(', '),
-                });
-            }
-
+            console.error('Appointment creation error:', error);
             res.status(500).json({
                 success: false,
-                message: error.message || 'Failed to create appointment',
+                message: error.message || 'Failed to create appointment'
             });
         }
     },
@@ -108,6 +124,8 @@ const appointmentController = {
     getPatientAppointmentsByName: async (req, res) => {
         try {
             const patientId = req.user.id;
+            
+            // Get appointments with populated doctor info and IPFS data
             const appointments = await appointmentModel.find({ patientId })
                 .populate('doctorId', 'fullName specialization')
                 .sort({ appointmentDate: 1 });
@@ -118,13 +136,36 @@ const appointmentController = {
                     message: "No appointments found for this patient"
                 });
             }
+
+            // Get IPFS data for each appointment
+            const appointmentsWithDetails = await Promise.all(appointments.map(async (appointment) => {
+                // Get sensitive data from IPFS
+                const sensitiveData = await IPFSService.retrieveAndDecrypt(
+                    appointment.ipfsCID,
+                    appointment.ipfsIV
+                );
+
+                return {
+                    _id: appointment._id,
+                    doctorId: appointment.doctorId,
+                    appointmentDate: appointment.appointmentDate,
+                    appointmentTime: sensitiveData.appointmentTime || appointment.appointmentTime,
+                    status: appointment.status,
+                    reason: sensitiveData.reason,
+                    department: sensitiveData.department,
+                    createdAt: appointment.createdAt,
+                    updatedAt: appointment.updatedAt
+                };
+            }));
+
             res.status(200).json({
                 success: true,
                 message: "Appointments fetched successfully",
-                count: appointments.length,
-                data: appointments
+                count: appointmentsWithDetails.length,
+                data: appointmentsWithDetails
             });
         } catch (error) {
+            console.error('Error in getPatientAppointmentsByName:', error);
             res.status(500).json({
                 success: false,
                 message: error.message || "Failed to fetch appointments"
@@ -348,56 +389,6 @@ const appointmentController = {
             return res.status(500).json({ success: false, message: error.message || "Failed to delete appointment" });
         }
     },
-
-    getDoctorTotalAppointments: async (req, res) => {
-        try {
-            const { fullName } = req.params;
-            
-            console.log("Searching for doctor with name:", fullName); // Debug log
-    
-            // METHOD 1: Exact match (case sensitive)
-            const doctor = await adddoctorModel.findOne({ fullName: fullName });
-    
-            if (!doctor) {
-                console.log("Available doctors:", 
-                    await adddoctorModel.find({}, 'fullName')); // Log all doctors
-                return res.status(404).json({
-                    success: false,
-                    message: `Doctor not found with name: ${fullName}`,
-                    debug: {
-                        searchedName: fullName,
-                        availableDoctors: await adddoctorModel.find({}, 'fullName')
-                    }
-                });
-            }
-
-            // Get appointments for the doctor
-            const appointments = await appointmentModel.find({ doctorId: doctor._id })
-                .populate('patientId', 'fullName email')
-                .sort({ appointmentDate: -1 });
-
-            console.log(`Found ${appointments.length} appointments for doctor ${fullName}`);
-
-            return res.status(200).json({
-                success: true,
-                message: "Doctor appointments fetched successfully",
-                data: {
-                    doctor: {
-                        id: doctor._id,
-                        fullName: doctor.fullName,
-                        email: doctor.email,
-                        specialization: doctor.specialization
-                    },
-                    appointments: appointments,
-                    totalAppointments: appointments.length
-                }
-            });
-        } catch (error) {
-            console.error("Error:", error);
-            res.status(500).json({ success: false, message: error.message });
-        }
-    },
-
     cancelAppointment: async (req, res) => {
         try {
             const { 
@@ -492,6 +483,38 @@ const appointmentController = {
         }
     },
 
-  
+    getDoctorOwnAppointments: async (req, res) => {
+        try {
+            if (req.user.role !== 'doctor') {
+                return res.status(403).json({ success: false, message: "Only doctors can view their appointments" });
+            }
+            const doctorEmail = req.user.email;
+            const doctor = await adddoctorModel.findOne({ email: doctorEmail });
+            if (!doctor) {
+                return res.status(404).json({ success: false, message: "Doctor not found" });
+            }
+            const appointments = await appointmentModel.find({ doctorId: doctor._id })
+                .populate('patientId', 'fullName email')
+                .sort({ appointmentDate: -1, appointmentTime: -1 });
+
+            const formatted = appointments.map(app => ({
+                _id: app._id,
+                patientName: app.patientId?.fullName || 'N/A',
+                email: app.patientId?.email || 'N/A',
+                dateTime: `${new Date(app.appointmentDate).toLocaleDateString()} ${app.appointmentTime}`,
+                status: app.status
+            }));
+
+            res.status(200).json({
+                success: true,
+                message: "Doctor's appointments fetched successfully",
+                data: {
+                    appointments: formatted
+                }
+            });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message || "Failed to fetch appointments" });
+        }
+    },
 };    
 module.exports = appointmentController;

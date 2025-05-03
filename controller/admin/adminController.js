@@ -7,7 +7,9 @@ const addpatientModel = require("../../models/patient/addpatientModel");
 const adddoctorModel = require("../../models/doctor/adddoctorModel");
 const appointmentModel = require("../../models/appointment/appointmentModel");
 const IPFSService = require('../../services/ipfsService');
-
+const InsurancePatient = require('../../models/insurance/insurancePatientModel');
+const AddPatient = require('../../models/patient/addpatientModel');
+const MedicalHistory = require('../../models/medicalHistory/medicalHistoryModel');
 // const adminLoginModel = require('../models/admin/adminloginModel');
 
 module.exports = {
@@ -64,14 +66,6 @@ module.exports = {
                 throw new Error("Token generation failed");
             }
 
-            // Set cookie
-            res.cookie('adminToken', token, {
-                expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict'
-            });
-
             // Return success response with token
             return res.status(200).json({
                 success: true,
@@ -79,7 +73,8 @@ module.exports = {
                 data: {
                     _id: admin._id,
                     email: admin.email,
-                    token: token // Ensure token is included in response
+                    role: 'admin', // Add role explicitly
+                    token: token
                 }
             });
 
@@ -618,4 +613,241 @@ module.exports = {
             });
         }
     },
+    // Get all pending access requests
+    getInsuranceAccessRequests: async (req, res) => {
+        try {
+            // Find all insurance patient records with pending access requests
+            const pendingRequests = await InsurancePatient.find({
+                'accessRequest.status': 'pending'
+            }).populate('patientId', 'fullName email contactnumber');
+
+            // Format the response
+            const formattedRequests = pendingRequests.map(request => ({
+                requestId: request._id,
+                patientDetails: {
+                    _id: request.patientId._id,
+                    name: request.patientId.fullName,
+                    email: request.patientId.email,
+                    phone: request.patientId.contactnumber
+                },
+                insuranceDetails: {
+                    name: request.accessRequest.insuranceName,
+                    requestDate: request.accessRequest.requestDate
+                },
+                status: request.accessRequest.status
+            }));
+
+            res.status(200).json({
+                success: true,
+                message: "Access requests retrieved successfully",
+                data: formattedRequests
+            });
+        } catch (error) {
+            console.error('Error fetching access requests:', error);
+            res.status(500).json({
+                success: false,
+                message: "Error fetching access requests",
+                error: error.message
+            });
+        }
+    },
+
+    // Handle access request (approve/deny)
+    handleInsuranceRequest: async (req, res) => {
+        try {
+            const { requestId, action } = req.body;
+
+            // Validate required fields
+            if (!requestId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Request ID is required"
+                });
+            }
+
+            if (!action || !['approve', 'deny'].includes(action)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Valid action (approve/deny) is required"
+                });
+            }
+
+            // Find the insurance patient record
+            const insurancePatient = await InsurancePatient.findById(requestId);
+            if (!insurancePatient) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Access request not found"
+                });
+            }
+
+            // Update the access request status
+            insurancePatient.accessRequest.status = action === 'approve' ? 'approved' : 'denied';
+            insurancePatient.hasAccess = action === 'approve';
+            insurancePatient.accessRequest.processedDate = new Date();
+
+            await insurancePatient.save();
+
+            res.status(200).json({
+                success: true,
+                message: `Access request ${action}d successfully`,
+                data: {
+                    requestId: insurancePatient._id,
+                    status: insurancePatient.accessRequest.status,
+                    hasAccess: insurancePatient.hasAccess
+                }
+            });
+        } catch (error) {
+            console.error('Error handling insurance request:', error);
+            res.status(500).json({
+                success: false,
+                message: "Error handling insurance request",
+                error: error.message
+            });
+        }
+    },
+
+    // Get all processed requests (approved/denied)
+    getProcessedAccessRequests: async (req, res) => {
+        try {
+            const processedRequests = await InsurancePatient.find({
+                'accessRequest.status': { $in: ['approved', 'denied'] }
+            }).populate('patientId', 'fullName email contactnumber')
+              .populate('accessRequest.insuranceId', 'name email companyName')
+              .populate('accessRequest.approvedBy', 'name')
+              .populate('accessRequest.deniedBy', 'name');
+
+            const formattedRequests = processedRequests.map(request => ({
+                requestId: request._id,
+                patientDetails: {
+                    name: request.patientId.fullName,
+                    email: request.patientId.email,
+                    phone: request.patientId.contactnumber
+                },
+                insuranceDetails: {
+                    name: request.accessRequest.insuranceName,
+                    companyName: request.accessRequest.insuranceId.companyName,
+                    email: request.accessRequest.insuranceId.email
+                },
+                requestDate: request.accessRequest.requestDate,
+                status: request.accessRequest.status,
+                processedBy: request.accessRequest.status === 'approved' 
+                    ? request.accessRequest.approvedBy.name 
+                    : request.accessRequest.deniedBy.name,
+                processedDate: request.accessRequest.status === 'approved'
+                    ? request.accessRequest.approvalDate
+                    : request.accessRequest.denialDate
+            }));
+
+            res.status(200).json({
+                success: true,
+                message: "Processed requests retrieved successfully",
+                data: formattedRequests
+            });
+        } catch (error) {
+            console.error('Error fetching processed requests:', error);
+            res.status(500).json({
+                success: false,
+                message: "Error fetching processed requests",
+                error: error.message
+            });
+        }
+    },
+
+    // Get all patients with basic information who have medical history
+    getAllPatientsforAdmin: async (req, res) => {
+        try {
+            // First get all medical history records
+            const medicalHistories = await MedicalHistory.find({})
+                .populate({
+                    path: 'patientId',
+                    select: 'fullName email contactnumber',
+                    model: 'AddPatient'
+                });
+
+            // Create a map to store unique patients
+            const patientsMap = new Map();
+
+            // Process each medical history record
+            medicalHistories.forEach(history => {
+                if (history.patientId) {
+                    const patientId = history.patientId._id.toString();
+                    if (!patientsMap.has(patientId)) {
+                        patientsMap.set(patientId, {
+                            _id: history.patientId._id,
+                            name: history.patientId.fullName,
+                            email: history.patientId.email,
+                            phone: history.patientId.contactnumber
+                        });
+                    }
+                }
+            });
+
+            // Convert map to array and sort by name
+            const formattedPatients = Array.from(patientsMap.values())
+                .sort((a, b) => a.name.localeCompare(b.name));
+
+            res.status(200).json({
+                success: true,
+                message: "Patients with medical history retrieved successfully",
+                data: formattedPatients
+            });
+        } catch (error) {
+            console.error('Error fetching patients:', error);
+            res.status(500).json({
+                success: false,
+                message: "Error fetching patients",
+                error: error.message
+            });
+        }
+    },
+
+    // Get medical history for a specific patient
+    getPatientMedicalHistoryAdmin: async (req, res) => {
+        try {
+            const { patientName } = req.params;
+
+            // Find patient by name
+            const patient = await AddPatient.findOne({ fullName: patientName });
+            if (!patient) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Patient not found"
+                });
+            }
+
+            // Get medical history with doctor details
+            const medicalHistory = await MedicalHistory.find({ patientId: patient._id })
+                .populate({
+                    path: 'doctorId',
+                    select: 'fullName',
+                    model: 'adddoctor'
+                })
+                .sort({ date: -1 });
+
+            // Format the response with null checks
+            const formattedHistory = medicalHistory.map(record => ({
+                doctorName: record.doctorId?.fullName || 'Unknown Doctor',
+                condition: record.condition || 'No condition specified',
+                notes: record.notes || 'No notes available',
+                date: record.date || new Date()
+            }));
+
+            res.status(200).json({
+                success: true,
+                message: "Patient medical history retrieved successfully",
+                data: {
+                    patientName: patient.fullName,
+                    medicalHistory: formattedHistory
+                }
+            });
+        } catch (error) {
+            console.error('Error fetching patient medical history:', error);
+            res.status(500).json({
+                success: false,
+                message: "Error fetching patient medical history",
+                error: error.message
+            });
+        }
+    }
 };

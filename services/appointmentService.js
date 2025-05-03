@@ -2,6 +2,7 @@ const appointmentModel = require('../models/appointment/appointmentModel');
 const addPatientModel = require('../models/patient/addpatientModel');
 const addDoctorModel = require('../models/doctor/adddoctorModel');  // This imports the 'adddoctor' model
 const mongoose = require('mongoose');
+const IPFSService = require('../services/IPFSService');
 
 const appointmentService = {
     createAppointment: async (appointmentData) => {
@@ -476,6 +477,28 @@ const appointmentService = {
             };
         } catch (error) {
             console.log("❌ Error deleting patient appointment:", error.message);
+            throw error;
+        }
+    },
+    getAppointmentDetails: async (appointmentId) => {
+        try {
+            const appointment = await appointmentModel.findById(appointmentId);
+            if (!appointment) {
+                throw new Error('Appointment not found');
+            }
+
+            // Get sensitive data from IPFS
+            const sensitiveData = await IPFSService.retrieveAndDecrypt(
+                appointment.ipfsCID,
+                appointment.ipfsIV
+            );
+
+            return {
+                ...appointment.toObject(),
+                appointmentDetails: sensitiveData
+            };
+        } catch (error) {
+            console.error('Error retrieving appointment details:', error);
             throw error;
         }
     }

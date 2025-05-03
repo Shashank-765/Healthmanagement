@@ -1,8 +1,13 @@
 const jwt = require('jsonwebtoken');
 const Cookies = require('js-cookie');
+const PatientSignup = require('../models/patient/signupModel');
+const addpatientModel = require('../models/patient/addpatientModel');
+const DoctorSignup = require('../models/doctor/signupModel');
+const adminSignupModel = require('../models/admin/adminSignupModel');
+const Signup = require('../models/insurance/signupModel');
 
 const authMiddleware = {
-    authenticateToken: (req, res, next) => {
+    authenticateToken: async (req, res, next) => {
         try {
             // Debug logs
             console.log('Headers received:', req.headers);
@@ -17,7 +22,7 @@ const authMiddleware = {
                 console.log('Token from Authorization header:', token);
             } else {
                 // Check for token in cookies
-                token = req.cookies?.adminToken;
+                token = req.cookies?.token;
                 console.log('Token from cookies:', token);
             }
 
@@ -29,8 +34,10 @@ const authMiddleware = {
                 });
             }
 
+            // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             console.log("Decoded token:", decoded);
+
             if (!decoded.role) {
                 console.error("Token missing role:", decoded);
                 return res.status(401).json({
@@ -39,7 +46,42 @@ const authMiddleware = {
                     message: "Token missing role"
                 });
             }
-            req.user = decoded;
+
+            // Find user based on role
+            let user;
+            switch (decoded.role) {
+                case 'admin':
+                    user = await adminSignupModel.findById(decoded.id);
+                    break;
+                case 'patient':
+                    user = await addpatientModel.findById(decoded.id) || 
+                           await PatientSignup.findById(decoded.id);
+                    break;
+                case 'doctor':
+                    user = await DoctorSignup.findById(decoded.id);
+                    break;
+                case 'insurance':
+                    user = await Signup.findById(decoded.id);
+                    break;
+            }
+
+            if (!user) {
+                return res.status(401).json({
+                    statusCode: 401,
+                    success: false,
+                    message: "User not found"
+                });
+            }
+
+            // Attach complete user info to request
+            req.user = {
+                id: user._id,
+                email: user.email,
+                role: decoded.role,
+                name: user.name || user.fullName
+            };
+
+            console.log('User attached to request:', req.user);
             next();
         } catch (error) {
             console.error('Detailed middleware error:', error);

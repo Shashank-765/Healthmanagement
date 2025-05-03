@@ -1,3 +1,51 @@
+// const mongoose = require('mongoose');
+
+// const appointmentSchema = new mongoose.Schema({
+//   patientId: {
+//     type: mongoose.Schema.Types.ObjectId,
+//     ref: 'AddPatient',
+//     required: true,
+//   },
+//   doctorId: {
+//     type: mongoose.Schema.Types.ObjectId,
+//     ref: 'adddoctor',
+//     required: true,
+//   },
+//   appointmentDate: {
+//     type: Date,
+//     required: true,
+//   },
+//   appointmentTime: {
+//     type: String,
+//     required: true,
+//     validate: {
+//       validator: function (value) {
+//        return /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/.test(value);
+//       },
+//       message: 'appointmentTime must be in the format "HH:MM AM/PM" (e.g., "10:30 AM")',
+//     },
+//   },
+//   status: {
+//     type: String,
+//     enum: ['confirm', 'pending', 'cancelled'],
+//     default: 'pending',
+//   },
+//   reason: {
+//     type: String,
+//     required: true,
+//   },
+// }, { timestamps: true });
+
+// module.exports = mongoose.model('Appointment', appointmentSchema);
+
+
+
+
+
+
+
+
+
 const mongoose = require('mongoose');
 
 const appointmentSchema = new mongoose.Schema({
@@ -6,34 +54,49 @@ const appointmentSchema = new mongoose.Schema({
     ref: 'AddPatient',
     required: true,
   },
+  patientEmail: {
+    type: String,
+    required: true,
+    lowercase: true,
+    trim: true,
+  },
   doctorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'adddoctor',
     required: true,
   },
+  doctorEmail: {
+    type: String,
+    required: true,
+    lowercase: true,
+    trim: true,
+  },
   appointmentDate: {
     type: Date,
-    required: true,
+    required: false,
   },
   appointmentTime: {
     type: String,
-    required: true,
-    validate: {
-      validator: function (value) {
-       return /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/.test(value);
-      },
-      message: 'appointmentTime must be in the format "HH:MM AM/PM" (e.g., "10:30 AM")',
-    },
+    required: false,
   },
   status: {
     type: String,
     enum: ['confirm', 'pending', 'cancelled'],
     default: 'pending',
   },
-  reason: {
+  ipfsCID: {
     type: String,
     required: true,
   },
+  ipfsIV: {
+    type: String,
+    required: true,
+  }
 }, { timestamps: true });
+
+// Add indexes for better query performance
+appointmentSchema.index({ patientEmail: 1 });
+appointmentSchema.index({ doctorEmail: 1 });
+appointmentSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Appointment', appointmentSchema);
