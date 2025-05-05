@@ -15,7 +15,7 @@ router.delete("/deletedoctors/:email", doctorController.deleteDoctor);
 
 // Add these new routes
 router.post('/assign-patient', doctorController.assignPatientToDoctor);
-router.get('/dashboard/:doctorId', doctorController.getDoctorDashboard);
+router.get('/dashboard/:doctorEmail', doctorController.getDoctorDashboard);
 router.post('/add-appointment', doctorController.addAppointmentToDoctor);
 router.get('/readdoctors/:email', doctorController.readDoctorsByEmail);
 

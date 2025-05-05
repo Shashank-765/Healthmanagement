@@ -6,6 +6,7 @@ const IPFSService = require('../../services/ipfsService');
 const appointmentController = {
     createAppointment: async (req, res) => {
         try {
+            console.log('Received appointment data:', req.body);
             const { department, doctorId, appointmentDate, appointmentTime, reason } = req.body;
             const patientId = req.user.id;
             const patientEmail = req.user.email.toLowerCase();
@@ -17,6 +18,7 @@ const appointmentController = {
                 department,
                 appointmentDate,
                 appointmentTime,
+                reason
             });
 
             // Basic field validation
@@ -28,27 +30,24 @@ const appointmentController = {
             }
 
             // Enhanced time format validation
-            const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM|am|pm)$/;
-            if (!timeRegex.test(appointmentTime)) {
+            const timeMatch = appointmentTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)$/);
+            if (!timeMatch) {
                 return res.status(400).json({
                     success: false,
                     message: 'appointmentTime must be in the format "HH:MM AM/PM" (e.g., "10:30 AM")',
                 });
             }
-
-            // Format time to ensure consistent format (e.g., "10:30 AM")
-            const [time, period] = appointmentTime.split(/\s+/);
-            const [hours, minutes] = time.split(':');
-            const formattedTime = `${hours.padStart(2, '0')}:${minutes} ${period.toUpperCase()}`;
-
-            // Validate and format date
+            const [, rawHours, rawMinutes, rawPeriod] = timeMatch;
+            const formattedTime = `${rawHours.padStart(2, '0')}:${rawMinutes} ${rawPeriod.toUpperCase()}`;
+    
+            // Validate and format appointmentDate
             const appointmentDateObj = new Date(appointmentDate);
             if (isNaN(appointmentDateObj.getTime())) {
                 return res.status(400).json({
                     success: false,
                     message: 'Invalid appointment date format. Please use YYYY-MM-DD format.',
                 });
-            }
+            }    
 
             // Find doctor to get their email
             const doctor = await adddoctorModel.findById(doctorId);
@@ -67,11 +66,12 @@ const appointmentController = {
                 reason,
                 createdAt: new Date(),
             };
-
+     console.log('Sensitive data to be uploaded to IPFS:', sensitiveData);
             // Upload to IPFS
             const ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
-
+    console.log('IPFS upload result:', ipfsResult);
             // Create appointment with all required MongoDB data and IPFS references
+            console.log(1)
             const appointment = new appointmentModel({
                 patientId,
                 patientEmail,
@@ -85,6 +85,9 @@ const appointmentController = {
             });
 
             await appointment.save();
+            console.log(2)
+
+            console.log('Appointment created:', appointment);
 
             // Update references in patient and doctor documents
             await addpatientModel.findByIdAndUpdate(patientId, {
@@ -113,7 +116,8 @@ const appointmentController = {
             });
 
         } catch (error) {
-            console.error('Appointment creation error:', error);
+            console.log('Appointment creation error:', error);
+            // console.error('Appointment creation error:', error);
             res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to create appointment'
@@ -502,7 +506,8 @@ const appointmentController = {
                 patientName: app.patientId?.fullName || 'N/A',
                 email: app.patientId?.email || 'N/A',
                 dateTime: `${new Date(app.appointmentDate).toLocaleDateString()} ${app.appointmentTime}`,
-                status: app.status
+                status: app.status,
+                doctorId: app.doctorId.toString()
             }));
 
             res.status(200).json({
@@ -514,6 +519,100 @@ const appointmentController = {
             });
         } catch (error) {
             res.status(500).json({ success: false, message: error.message || "Failed to fetch appointments" });
+        }
+    },
+
+    updateAppointmentStatus: async (req, res) => {
+        try {
+            const { appointmentId, status } = req.body;
+            const userId = req.user.id;
+            const userRole = req.user.role;
+
+            console.log('Updating appointment status:', {
+                appointmentId,
+                status,
+                userId,
+                userRole
+            });
+
+            // Validate required fields
+            if (!appointmentId || !status) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Appointment ID and status are required"
+                });
+            }
+
+            // Validate status value
+            if (!['confirm', 'pending', 'cancelled'].includes(status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid status. Must be: confirm, pending, or cancelled"
+                });
+            }
+
+            // Find the appointment
+            const appointment = await appointmentModel.findById(appointmentId);
+            if (!appointment) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Appointment not found"
+                });
+            }
+
+            console.log('Found appointment:', {
+                appointmentId: appointment._id,
+                doctorId: appointment.doctorId,
+                status: appointment.status
+            });
+
+            // Check if user is authorized (admin or doctor)
+            if (userRole !== 'admin' && userRole !== 'doctor') {
+                return res.status(403).json({
+                    success: false,
+                    message: "Unauthorized: Only doctors and admins can update appointment status"
+                });
+            }
+
+            // If user is doctor, check if they are the assigned doctor
+            if (userRole === 'doctor') {
+                const doctor = await adddoctorModel.findOne({ email: req.user.email });
+                if (!doctor) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Doctor not found"
+                    });
+                }
+
+                if (appointment.doctorId.toString() !== doctor._id.toString()) {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Unauthorized: You can only update appointments assigned to you"
+                    });
+                }
+            }
+
+            // Update appointment status
+            appointment.status = status;
+            await appointment.save();
+
+            console.log('Appointment status updated successfully');
+
+            res.status(200).json({
+                success: true,
+                message: "Appointment status updated successfully",
+                data: {
+                    appointmentId: appointment._id,
+                    status: appointment.status
+                }
+            });
+
+        } catch (error) {
+            console.error("Error updating appointment status:", error);
+            res.status(500).json({
+                success: false,
+                message: error.message || "Failed to update appointment status"
+            });
         }
     },
 };    

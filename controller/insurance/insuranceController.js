@@ -134,6 +134,8 @@ module.exports = {
     getPatientsWithMedicalHistory: async (req, res) => {
         try {
             // Get all medical history records with proper error handling
+            const totalMedicalHistory = await MedicalHistory.countDocuments();
+            const totalInsurancePatients = await InsurancePatient.countDocuments({ hasAccess: true });
             const medicalHistories = await MedicalHistory.find({})
                 .populate({
                     path: 'patientId',
@@ -160,8 +162,7 @@ module.exports = {
                     console.log('Skipping record with missing patient or doctor:', history._id);
                     continue;
                 }
-
-                // Create patient data with default values for missing fields
+               // Create patient data with default values for missing fields
                 const patientData = {
                     patientId: history.patientId._id,
                     name: history.patientId.fullName || 'Unknown',
@@ -172,7 +173,9 @@ module.exports = {
                         notes: history.notes || 'No notes available',
                         date: history.date || new Date(),
                         doctorId: history.doctorId._id,
-                        doctorName: history.doctorId.fullName || 'Unknown Doctor'
+                        doctorName: history.doctorId.fullName || 'Unknown Doctor',
+                        totalMedicalHistory,
+                        totalInsurancePatients
                     }]
                 };
 
@@ -208,7 +211,7 @@ module.exports = {
                     email: patient.email || 'No email provided',
                     phone: patient.phone || 'No phone provided',
                     isVerified: patient.isVerified || false,
-                    hasAccess: patient.hasAccess || false
+                    hasAccess: patient.hasAccess || false,
                 };
 
                 // If access is granted, include medical history
@@ -231,6 +234,8 @@ module.exports = {
             res.status(200).json({
                 success: true,
                 message: "Patients with medical history fetched successfully",
+                totalMedicalHistory: totalMedicalHistory,
+                totalInsurancePatients: totalInsurancePatients,
                 data: formattedPatients
             });
         } catch (error) {
@@ -397,10 +402,10 @@ module.exports = {
 
             // Format the response
             const formattedHistory = medicalHistory.map(record => ({
-                patientName: patient.fullName,
-                doctorName: record.doctorId.fullName,
-                condition: record.condition,
-                notes: record.notes,
+                patientName: patient.fullName || 'Unknown Patient',
+                doctorName: record.doctorId?.fullName || 'Unknown Doctor',
+                condition: record.condition || 'No condition specified',
+                notes: record.notes || 'No notes available',
                 date: record.date
             }));
 

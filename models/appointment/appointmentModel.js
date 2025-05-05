@@ -15,15 +15,6 @@
 //     type: Date,
 //     required: true,
 //   },
-//   appointmentTime: {
-//     type: String,
-//     required: true,
-//     validate: {
-//       validator: function (value) {
-//        return /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/.test(value);
-//       },
-//       message: 'appointmentTime must be in the format "HH:MM AM/PM" (e.g., "10:30 AM")',
-//     },
 //   },
 //   status: {
 //     type: String,

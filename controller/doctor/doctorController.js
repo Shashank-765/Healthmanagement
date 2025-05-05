@@ -239,6 +239,7 @@ module.exports = {
         try {
             const { email } = req.params;
             const updateData = req.body;
+            delete updateData.email; // Prevent email change
             let fileInfo = null;
 
             // Handle file upload if present
@@ -284,7 +285,7 @@ module.exports = {
     deleteDoctor: async (req, res) => {
         try {
             const { email } = req.params;
-            const deletedDoctor = await doctorManagementService.deleteDoctor(email);
+            const deletedDoctor = await adddoctorModel.findOneAndDelete({ email: email.toLowerCase().trim() });
 
             // Delete profile image if exists
             if (deletedDoctor.profileimage) {
@@ -326,46 +327,31 @@ module.exports = {
 
     getDoctorDashboard: async (req, res) => {
         try {
-            const doctorId = req.params.doctorId || req.user?.id;
+            // Get doctor email from params or user (token)
+            const doctorEmail = req.params.doctorEmail || req.user?.email;
 
-            // Check if doctorId is provided
-            if (!doctorId) {
+            // Check if doctorEmail is provided
+            if (!doctorEmail) {
                 return res.status(400).json({
                     success: false,
-                    message: "Doctor ID is required"
+                    message: "Doctor email is required"
                 });
             }
 
-            // First check in signup collection
-            let doctor = await doctorSignup.findById(doctorId);
-            
-            // If not found in signup, check in adddoctor collection
-            if (!doctor) {
-                doctor = await adddoctorModel.findById(doctorId);
-            }
-
-            // If doctor not found in either collection
-            if (!doctor) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Doctor not found"
-                });
-            }
-
-            const dashboardData = await getDoctorDashboardData(doctorId);
-            
+            // Fetch dashboard data by email
+            console.log('Looking for doctor with email:', doctorEmail);
+            const doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+            const dashboardData = await getDoctorDashboardData(doctorEmail || req.user.email);
             res.status(200).json(dashboardData);
         } catch (error) {
             console.error('Error in getDoctorDashboard:', error);
-            
             // Handle specific MongoDB ObjectId casting error
             if (error.name === 'CastError' && error.kind === 'ObjectId') {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid doctor ID format"
+                    message: "Invalid doctor email format"
                 });
             }
-
             res.status(500).json({
                 success: false,
                 message: error.message || "Internal server error"

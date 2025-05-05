@@ -16,9 +16,9 @@ const fs = require('fs');
 
 // CORS configuration
 const corsOptions = {
-    origin: 'http://localhost:3000', // Your frontend URL
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Your frontend URL
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
     exposedHeaders: ['Set-Cookie'],
     maxAge: 86400 // 24 hours

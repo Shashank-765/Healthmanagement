@@ -10,8 +10,8 @@ const authMiddleware = {
     authenticateToken: async (req, res, next) => {
         try {
             // Debug logs
-            console.log('Headers received:', req.headers);
-            console.log('Cookies received:', req.cookies);
+            // console.log('Headers received:', req.headers);
+            // console.log('Cookies received:', req.cookies);
 
             // Check for token in Authorization header
             const authHeader = req.headers.authorization;

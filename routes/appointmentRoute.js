@@ -46,8 +46,9 @@ router.get('/doctors/all',
 
 
 // Update appointment status (doctor/admin only)
-router.patch('/update-status',
-    appointmentController.updatePatientStatus
+router.put('/update-status',
+    authenticateToken,
+    appointmentController.updateAppointmentStatus
 );
 
 router.delete('/delete-appointment/id/:id', authenticateToken, appointmentController.deleteAppointmentById);

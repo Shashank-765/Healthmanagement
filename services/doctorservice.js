@@ -9,6 +9,7 @@ const IPFSService = require('./ipfsService');
 const mnemonic = process.env.mnemonic;
 const adddoctorModel = require('../models/doctor/adddoctorModel');
 const appointmentModel = require('../models/appointment/appointmentModel');
+const medicalHistoryModel = require('../models/medicalHistory/medicalHistoryModel');
 
 const doctorSignupService = {
     generateWallet: async () => {
@@ -409,43 +410,75 @@ const doctorManagementService = {
 
     updateDoctor: async (email, updateData) => {
         try {
-            console.log('Searching for doctor with email:', email);
-            
-            // Find the doctor
-            const doctor = await adddoctorModel.findOne({ email });
-            console.log('Found doctor:', doctor);
-            
-            if (!doctor) {
-                console.log('No doctor found with email:', email);
-                throw new Error("Doctor not found");
+            const cleanEmail = email.toLowerCase().trim();
+            console.log('Updating doctor with email:', cleanEmail);
+            console.log('Update data received:', updateData);
+
+            const doctor = await adddoctorModel.findOne({ email: cleanEmail });
+            if (!doctor) throw new Error("Doctor not found");
+
+            // Remove email from updateData to prevent accidental change
+            delete updateData.email;
+
+            // Format specialization to remove 'ist' suffix if present
+            let specialization = updateData.specialization || doctor.specialization;
+            if (typeof specialization === 'string' && specialization.toLowerCase().endsWith('ist')) {
+                // Convert 'Cardiologist' -> 'Cardiology', 'Neurologist' -> 'Neurology', etc.
+                if (specialization.toLowerCase() === 'cardiologist') specialization = 'Cardiology';
+                else if (specialization.toLowerCase() === 'neurologist') specialization = 'Neurology';
+                else if (specialization.toLowerCase() === 'dermatologist') specialization = 'Dermatology';
+                else specialization = specialization.slice(0, -3) + 'y';
             }
 
-            // Prepare sensitive and insensitive data
+            // Clean and validate the data
             const insensitiveData = {
-                specialization: updateData.specialization,
-                experience: updateData.experience,
-                contactnumber: updateData.contactnumber,
-                profileimage: updateData.profileimage,
-                bio: updateData.bio,
-                address: updateData.address,
-                qualification: updateData.qualification
+                fullName: updateData.fullName || doctor.fullName,
+                specialization: specialization,
+                department: specialization, // Use the same formatted specialization
+                experience: parseInt(updateData.experience) || doctor.experience,
+                availability: updateData.availability || doctor.availability,
+                contactnumber: updateData.contactnumber || doctor.contactnumber,
+                qualification: updateData.qualification || doctor.qualification,
+                address: updateData.address || doctor.address,
+                bio: updateData.bio || doctor.bio
             };
 
-            // Update insensitive data in MongoDB
+            // Add profileimage only if it exists in updateData
+            if (updateData.profileimage) {
+                insensitiveData.profileimage = updateData.profileimage;
+            }
+
+            console.log('Data to update:', insensitiveData);
+
+            // First update the doctor document
             const updatedDoctor = await adddoctorModel.findOneAndUpdate(
-                { email },
-                { $set: insensitiveData },
-                { new: true }
+                { email: cleanEmail },
+                { 
+                    $set: insensitiveData,
+                    $currentDate: { lastLoginAt: true, updatedAt: true }
+                },
+                { 
+                    new: true,
+                    runValidators: true
+                }
             );
 
-            // If there's sensitive data to update
+            if (!updatedDoctor) {
+                throw new Error("Failed to update doctor");
+            }
+
+            console.log('Updated doctor:', updatedDoctor);
+
+            // If there's sensitive data to update and IPFS is configured
             if (doctor.ipfsCID) {
                 const sensitiveData = {
-                    contactnumber: updateData.contactnumber,
-                    profileimage: updateData.profileimage,
-                    qualification: updateData.qualification,
-                    address: updateData.address,
-                    bio: updateData.bio
+                    contactnumber: updateData.contactnumber || doctor.contactnumber,
+                    profileimage: updateData.profileimage || doctor.profileimage,
+                    qualification: updateData.qualification || doctor.qualification,
+                    address: updateData.address || doctor.address,
+                    bio: updateData.bio || doctor.bio,
+                    specialization: specialization,
+                    department: specialization
                 };
 
                 // Upload updated sensitive data to IPFS
@@ -453,11 +486,12 @@ const doctorManagementService = {
 
                 // Update IPFS references
                 await adddoctorModel.findOneAndUpdate(
-                    { email },
+                    { email: cleanEmail },
                     { 
                         ipfsCID: ipfsResult.cid,
                         ipfsIV: ipfsResult.iv
-                    }
+                    },
+                    { new: true }
                 );
             }
 
@@ -544,44 +578,34 @@ const addAppointmentToDoctor = async (doctorId, appointmentId) => {
     }
 };
 
-const getDoctorDashboardData = async (doctorId) => {
+const getDoctorDashboardData = async (doctorEmail) => {
     try {
-        console.log('Received doctorId:', doctorId);
-
-        // Get doctor info from adddoctorModel since that's where active doctors are
-        const doctor = await adddoctorModel.findOne({ _id: '68108d284ee97fc854dec73a' });
+        console.log('Looking for doctor with email:', doctorEmail);
+        const doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
         if (!doctor) {
             throw new Error('Doctor not found');
         }
 
-        console.log('Found doctor:', {
-            id: doctor._id,
-            name: doctor.fullName,
-            email: doctor.email
-        });
+        // Appointments for this doctor
+        const appointmentQuery = { doctorId: doctor._id };
 
-        // Get appointments for this doctor
-        const appointmentQuery = { doctorId: '68108d284ee97fc854dec73a' };
-        console.log('Appointment query:', appointmentQuery);
-        
-        // Get total appointments
+        // Total appointments
         const totalAppointments = await appointmentModel.countDocuments(appointmentQuery);
-        console.log('Total appointments:', totalAppointments);
 
-        // Get total unique patients
+        // Total unique patients
         const uniquePatients = await appointmentModel.distinct('patientId', appointmentQuery);
         const totalPatients = uniquePatients.length;
-        console.log('Total unique patients:', totalPatients);
 
-        // Get recent appointments (last 2)
+        // Total medical histories created by this doctor
+        const totalMedicalHistory = await medicalHistoryModel.countDocuments({ doctorId: doctor._id });
+
+        // Recent appointments (last 2)
         const recentAppointments = await appointmentModel
             .find(appointmentQuery)
             .sort({ createdAt: -1 })
             .limit(2)
             .populate('patientId', 'fullName')
             .select('patientId appointmentTime status');
-        
-        console.log('Recent appointments found:', recentAppointments.length);
 
         // Format recent appointments
         const formattedAppointments = recentAppointments.map(apt => ({
@@ -595,7 +619,7 @@ const getDoctorDashboardData = async (doctorId) => {
             data: {
                 totalAppointments,
                 totalPatients,
-                totalHospital: 1,
+                totalMedicalHistory,
                 recentAppointments: formattedAppointments,
                 doctorInfo: {
                     fullName: doctor.fullName,
@@ -605,7 +629,7 @@ const getDoctorDashboardData = async (doctorId) => {
             }
         };
     } catch (error) {
-        console.error('Error in getDoctorDashboardData:', error);
+        console.log('Error in getDoctorDashboardData:', error.message);
         throw new Error(`Error fetching doctor dashboard data: ${error.message}`);
     }
 };
