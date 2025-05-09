@@ -43,7 +43,7 @@ const appointmentSchema = new mongoose.Schema({
   patientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'AddPatient',
-    required: true,
+    // required: true,
   },
   patientEmail: {
     type: String,
@@ -54,11 +54,11 @@ const appointmentSchema = new mongoose.Schema({
   doctorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'adddoctor',
-    required: true,
+    // required: true,
   },
   doctorEmail: {
     type: String,
-    required: true,
+    // required: true,
     lowercase: true,
     trim: true,
   },

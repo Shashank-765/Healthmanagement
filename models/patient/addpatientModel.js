@@ -1,4 +1,4 @@
-// const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 // const addpatientSchema = new mongoose.Schema({
 //     fullName: {
@@ -19,29 +19,24 @@
 //         }
 //     },
 //     medicalCondition: {
-//         type: String,
-//         required: true
+//         type: String
 //     },
 //     admitDate: {
-//         type: Date,
-//         required: true
+//         type: Date
 //     },
 //     medicalDocument: {
 //         type: String,
 //         required: [true, 'Medical document is required']
 //     },
 //     roomNumber: {
-//         type: Number,
-//         required: true
+//         type: Number
 //     },
 //     assignedDoctor: {
-//         type: String,
-//         required: [true, 'Assigned doctor is required']
+//         type: String
 //     },
 //     medicalHistory: {
-//         type: String,
-//         required: [true, 'Medical history is required']
-//     },
+//         type: String
+//      },
 //     ipfsCID: {
 //         type: String,
 //         required: true
@@ -65,22 +60,19 @@
 // module.exports = AddPatient;
 
 
-
-
-
-
-
-const mongoose = require("mongoose");
-
 const addpatientSchema = new mongoose.Schema({
+    patientId: {
+        type: mongoose.Schema.Types.ObjectId,
+        // required: true,
+        index: true
+    },
     fullName: {
         type: String,
-        required: true
+        // required: true
     },
     email: {
         type: String,
         required: [true, 'email is required'],
-        unique: true,  // This ensures email uniqueness
         lowercase: true,
         trim: true,
         validate: {
@@ -88,39 +80,44 @@ const addpatientSchema = new mongoose.Schema({
                 return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
             },
             message: props => `${props.value} is not a valid email!`
-        },
-        index: true  // Add index for better query performance
+        }
     },
-    // ... other existing fields ...
-    
+    ipfsCID: {
+        type: String,
+        // required: true
+    },
+    ipfsIV: {
+        type: String,
+        // required: true
+    },
     appointments: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Appointment'
     }],
     primaryDoctor: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'adddoctor'  // Make sure this matches your doctor model name
-    },
-    // Add this method to help manage appointments
-    lastLoginAt: {
-        type: Date,
-        default: Date.now
+        ref: 'Doctor'
     }
 }, { timestamps: true });
 
-// Add methods to manage appointments
-addpatientSchema.methods.addAppointment = async function(appointmentId) {
-    if (!this.appointments.includes(appointmentId)) {
-        this.appointments.push(appointmentId);
-        await this.save();
+const AddPatient = mongoose.model("AddPatient", addpatientSchema);
+
+// Function to drop existing indexes and recreate them
+const recreateIndexes = async () => {
+    try {
+        // Drop all existing indexes
+        await AddPatient.collection.dropIndexes();
+        
+        // Create new indexes
+        await AddPatient.createIndexes();
+        
+        console.log('Indexes recreated successfully');
+    } catch (error) {
+        console.error('Error recreating indexes:', error);
     }
 };
 
-// Add a pre-save hook to ensure email is always lowercase
-addpatientSchema.pre('save', function(next) {
-    this.email = this.email.toLowerCase();
-    next();
-});
+// Call the function to recreate indexes
+recreateIndexes();
 
-const AddPatient = mongoose.model("AddPatient", addpatientSchema);
 module.exports = AddPatient;

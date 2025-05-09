@@ -501,6 +501,42 @@ const appointmentService = {
             console.error('Error retrieving appointment details:', error);
             throw error;
         }
+    },
+    deleteAppointmentById: async (appointmentId) => {
+        try {
+            // Find the appointment
+            const appointment = await appointmentModel.findById(appointmentId);
+            
+            if (!appointment) {
+                throw new Error("Appointment not found");
+            }
+
+            // Remove appointment reference from patient
+            await addPatientModel.findByIdAndUpdate(appointment.patientId, {
+                $pull: { appointments: appointment._id }
+            });
+
+            // Remove appointment reference from doctor
+            await addDoctorModel.findByIdAndUpdate(appointment.doctorId, {
+                $pull: { appointments: appointment._id }
+            });
+
+            // Delete the appointment
+            await appointmentModel.findByIdAndDelete(appointmentId);
+
+            return {
+                success: true,
+                message: "Appointment deleted successfully",
+                data: {
+                    appointmentId: appointment._id,
+                    appointmentDate: appointment.appointmentDate,
+                    appointmentTime: appointment.appointmentTime
+                }
+            };
+        } catch (error) {
+            console.log("Error deleting appointment:", error.message);
+            throw error;
+        }
     }
 };
 

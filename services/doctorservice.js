@@ -32,7 +32,7 @@ const doctorSignupService = {
 
     validateDoctorData: async (doctorData) => {
         try {
-        if (!doctorData) {
+            if (!doctorData) {
                 throw new Error("Doctor data is required");
             }
 
@@ -52,9 +52,9 @@ const doctorSignupService = {
             const missingFields = requiredFields.filter(field => !doctorData[field]);
             if (missingFields.length > 0) {
                 throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-        }
-        
-        // Validate email format
+            }
+
+            // Validate email format
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(doctorData.email)) {
                 throw new Error("Please enter a valid email address");
@@ -89,20 +89,10 @@ const doctorSignupService = {
 
     createDoctor: async (validatedData) => {
         try {
-            // Create MongoDB document with all required fields
+            // Create MongoDB document with only essential fields
             const mongoData = {
                 fullName: validatedData.fullName,
-                gender: validatedData.gender,
-                dateOfBirth: validatedData.dateOfBirth,
-                contactNumber: validatedData.contactNumber,
-                email: validatedData.email,
-                password: validatedData.password,
-                specialization: validatedData.specialization,
-                medicalLicenseNumber: validatedData.medicalLicenseNumber,
-                yearsOfExperience: validatedData.yearsOfExperience,
-                hospitalClinicName: validatedData.hospitalClinicName,
-                medicalDocument: validatedData.medicalDocument,
-                walletAddress: validatedData.walletAddress
+                email: validatedData.email
             };
 
             // Create doctor in MongoDB
@@ -112,32 +102,25 @@ const doctorSignupService = {
             const sensitiveData = {
                 password: validatedData.password,
                 walletAddress: validatedData.walletAddress,
-                contactNumber: validatedData.contactNumber,
-                medicalLicenseNumber: validatedData.medicalLicenseNumber,
-                medicalDocument: validatedData.medicalDocument,
                 gender: validatedData.gender,
                 dateOfBirth: validatedData.dateOfBirth,
+                contactNumber: validatedData.contactNumber,
                 specialization: validatedData.specialization,
+                medicalLicenseNumber: validatedData.medicalLicenseNumber,
                 yearsOfExperience: validatedData.yearsOfExperience,
-                hospitalClinicName: validatedData.hospitalClinicName
+                hospitalClinicName: validatedData.hospitalClinicName,
+                medicalDocument: validatedData.medicalDocument
             };
 
             // Upload sensitive data to IPFS
             const ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
 
             // Update doctor with IPFS data
-            await doctorSignup.findByIdAndUpdate(doctor._id, {
-                ipfsCID: ipfsResult.cid,
-                ipfsIV: ipfsResult.iv
-            });
+            doctor.ipfsCID = ipfsResult.cid;
+            doctor.ipfsIV = ipfsResult.iv;
+            await doctor.save();
 
-            // Return the complete doctor document
-            const updatedDoctor = await doctorSignup.findById(doctor._id);
-            if (!updatedDoctor) {
-                throw new Error("Failed to create doctor record");
-            }
-
-            return updatedDoctor;
+            return doctor;
         } catch (error) {
             console.error('Error in createDoctor:', error);
             throw error;
@@ -148,43 +131,74 @@ const doctorSignupService = {
 const doctorLoginService = {
     validateLogin: async (email, password) => {
         try {
+            console.log("Starting login validation for email:", email);
+            
             if (!email || !password) {
-                throw new Error("Please provide email and password");
+                throw new Error("Please provide both email and password");
             }
 
             // First check in doctorsignups collection
-            let doctor = await doctorSignup.findOne({ email });
+            const doctor = await doctorSignup.findOne({ 
+                email: { $regex: new RegExp(`^${email}$`, 'i') }
+            });
             
-            // If not found in signup, check in adddoctor collection
-            if (!doctor) {
-                doctor = await adddoctorModel.findOne({ email });
-            }
+            console.log("Doctor found in signup:", doctor ? "Yes" : "No");
 
             if (!doctor) {
                 throw new Error("Invalid email or password");
             }
+
+            // Get sensitive data from IPFS
+            console.log("Retrieving sensitive data from IPFS");
+            const sensitiveData = await IPFSService.retrieveAndDecrypt(
+                doctor.ipfsCID,
+                doctor.ipfsIV
+            );
+
+            console.log("Sensitive data retrieved:", sensitiveData ? "Yes" : "No");
 
             // Verify password
-            const isMatch = await bcrypt.compare(password, doctor.password);
-            if (!isMatch) {
+            const isPasswordValid = await bcrypt.compare(password, sensitiveData.password);
+            console.log("Password validation result:", isPasswordValid);
+
+            if (!isPasswordValid) {
                 throw new Error("Invalid email or password");
             }
 
-            return doctor;
+            // Check if doctor exists in adddoctor collection
+            let addedDoctor = await adddoctorModel.findOne({ 
+                email: { $regex: new RegExp(`^${email}$`, 'i') }
+            });
+
+            // Return the appropriate doctor object
+            return {
+                _id: doctor._id,
+                fullName: doctor.fullName,
+                email: doctor.email,
+                specialization: sensitiveData.specialization,
+                walletAddress: sensitiveData.walletAddress,
+                ipfsCID: doctor.ipfsCID,
+                ipfsIV: doctor.ipfsIV,
+                isProfileComplete: !!addedDoctor
+            };
+
         } catch (error) {
-            throw new Error(error.message || "Login validation failed");
+            console.error("Login validation error:", error);
+            throw error;
         }
     },
+
     generateToken: (doctorId) => {
         return jwt.sign(
             { 
                 id: doctorId,
-                role: 'doctor'  // Add role to token
+                role: 'doctor'
             },
             process.env.JWT_SECRET,
             { expiresIn: '30d' }
         );
     },
+
     createDoctorLogin: async (doctorLoginData) => {
         try {
             const doctorLogin = await doctorLogin.create(doctorLoginData);
@@ -379,20 +393,14 @@ const doctorManagementService = {
         try {
             const { specialization, fullName } = filters;
             let query = {};
-
-            // Add filters if provided
             if (specialization) {
-                query.specialization = { $regex: new RegExp(specialization, 'i') }; // Case-insensitive search
+                query.specialization = { $regex: new RegExp(specialization, 'i') };
             }
             if (fullName) {
-                query.fullName = { $regex: new RegExp(fullName, 'i') }; // Case-insensitive search
+                query.fullName = { $regex: new RegExp(fullName, 'i') };
             }
-
-            console.log('Filter Query:', query);
-
-            // Fetch doctors with selected fields
-            const doctors = await adddoctorModel.find(query)
-                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio')
+                const doctors = await adddoctorModel.find(query)
+                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio').sort({createdAt:-1})
                 .lean();
 
             if (doctors.length === 0) {
@@ -424,9 +432,10 @@ const doctorManagementService = {
             let specialization = updateData.specialization || doctor.specialization;
             if (typeof specialization === 'string' && specialization.toLowerCase().endsWith('ist')) {
                 // Convert 'Cardiologist' -> 'Cardiology', 'Neurologist' -> 'Neurology', etc.
-                if (specialization.toLowerCase() === 'cardiologist') specialization = 'Cardiology';
-                else if (specialization.toLowerCase() === 'neurologist') specialization = 'Neurology';
-                else if (specialization.toLowerCase() === 'dermatologist') specialization = 'Dermatology';
+                if (specialization.toLowerCase() === 'cardiologist') specialization = 'Cardiologist';
+                else if (specialization.toLowerCase() === 'neurologist') specialization = 'Neurologist';
+                else if (specialization.toLowerCase() === 'dermatologist') specialization = 'Dermatologist';
+                else if (specialization.toLowerCase() === 'orthopedics') specialization = 'Orthopedics';
                 else specialization = specialization.slice(0, -3) + 'y';
             }
 
@@ -581,25 +590,16 @@ const addAppointmentToDoctor = async (doctorId, appointmentId) => {
 const getDoctorDashboardData = async (doctorEmail) => {
     try {
         console.log('Looking for doctor with email:', doctorEmail);
-        const doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+        const doctor = await doctorLogin.findOne({ email: doctorEmail.toLowerCase().trim() });
         if (!doctor) {
             throw new Error('Doctor not found');
         }
-
-        // Appointments for this doctor
         const appointmentQuery = { doctorId: doctor._id };
-
-        // Total appointments
         const totalAppointments = await appointmentModel.countDocuments(appointmentQuery);
-
-        // Total unique patients
         const uniquePatients = await appointmentModel.distinct('patientId', appointmentQuery);
         const totalPatients = uniquePatients.length;
-
-        // Total medical histories created by this doctor
         const totalMedicalHistory = await medicalHistoryModel.countDocuments({ doctorId: doctor._id });
 
-        // Recent appointments (last 2)
         const recentAppointments = await appointmentModel
             .find(appointmentQuery)
             .sort({ createdAt: -1 })

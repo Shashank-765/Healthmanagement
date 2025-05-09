@@ -3,27 +3,34 @@ const mongoose = require("mongoose");
 const adddoctorSchema = new mongoose.Schema({
     fullName: {
         type: String,
-        required: true
+        // required: true
     },
     specialization: {
         type: String,
-        required: true
+        // required: [true, 'Specialization is required'],
+        enum: [
+            'Cardiologist',
+            'Neurologist',
+            'Dermatologist',
+            'General Medicine',
+            'Orthopedics'
+        ]
     },
     department: {
         type: String
     },
         experience:{
         type:Number,
-        required:true
+        // required:true
 
     },
     availability:{
         type:String,
-        required:true
+        // required:true
     },
     contactnumber: {
         type: String,
-        required: [true, 'phoneNumber is required'],
+        // required: [true, 'phoneNumber is required'],
         validate: {
             validator: function(v) {
                 return /^\d{10}$/.test(v);
@@ -33,15 +40,14 @@ const adddoctorSchema = new mongoose.Schema({
     },
         qualification:{
         type:String,
-        required:true
+        // required:true
     },
     address:{
         type:String,
-        required:true
+        // required:true
     },
     bio:{
         type:String,
-        required:true
     },  
     profileimage:{
         type:String,

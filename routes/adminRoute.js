@@ -11,7 +11,6 @@ router.get('/admin-data', authenticateToken, adminController.getAdminData);
 router.get('/confirmed-appointments', authenticateToken, adminController.fetchdataConfirmedAppointments);
 router.get('/pending-appointments', authenticateToken, adminController.fetchdataPendingAppointments);
 router.put('/update-appointment-status/:appointmentId', authenticateToken, adminController.updateAppointmentStatus);
-router.post('/transfer-signup-data', authenticateToken, adminController.transferSignupData);
 router.post('/transfer-patient-signup',adminController.transferPatientSignup);
 
 // Insurance access request routes

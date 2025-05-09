@@ -19,7 +19,6 @@ const authMiddleware = {
 
             if (authHeader) {
                 token = authHeader.split(' ')[1];
-                console.log('Token from Authorization header:', token);
             } else {
                 // Check for token in cookies
                 token = req.cookies?.token;
@@ -36,7 +35,7 @@ const authMiddleware = {
 
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            console.log("Decoded token:", decoded);
+        
 
             if (!decoded.role) {
                 console.error("Token missing role:", decoded);
@@ -81,7 +80,6 @@ const authMiddleware = {
                 name: user.name || user.fullName
             };
 
-            console.log('User attached to request:', req.user);
             next();
         } catch (error) {
             console.error('Detailed middleware error:', error);

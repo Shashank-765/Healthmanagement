@@ -9,6 +9,7 @@ const encryptionService = require('../../utils/encryptdecrypt');
 const patientSensitiveDataService = require('../../services/patientSensitiveDataService');
 const addpatientModel = require('../../models/patient/addpatientModel');
 const jwt = require('jsonwebtoken');
+const getPatientSensitiveData = require('../../services/patientSensitiveDataService');
 
 module.exports = {
     patientSignup: async (req, res) => {
@@ -33,7 +34,7 @@ module.exports = {
                 knownAllergies: req.body.knownAllergies,
                 currentMedication: req.body.currentMedication,
                 medicalHistory: req.body.medicalHistory,
-                medicalDocument: req.file.path // Add the uploaded file path
+                medicalDocument: req.file.path
             };
 
             // Validate and create patient
@@ -47,10 +48,9 @@ module.exports = {
                 data: {
                     _id: patient._id,
                     fullName: patient.fullName,
-                    gender: patient.gender,
                     email: patient.email,
                     ipfsCID: patient.ipfsCID,
-                    age: patient.age,
+                    ipfsIV: patient.ipfsIV,
                     createdAt: patient.createdAt,
                     updatedAt: patient.updatedAt
                 }
@@ -58,24 +58,7 @@ module.exports = {
 
         } catch (error) {
             console.error("\n=== ERROR IN PATIENT SIGNUP ===", error.message);
-            console.error("Error details:", {
-                message: error.message,
-                stack: error.stack
-            });
-            
-            // Handle validation errors
-            if (error.message.includes("Validation failed")) {
-                return res.status(400).json({
-                    success: false,
-                    message: error.message
-                });
-            }
-
-            // Handle other errors
-            const statusCode = error.message.includes("required") ||
-                error.message.includes("exists") ? 400 : 500;
-
-            return res.status(statusCode).json({
+            return res.status(error.message.includes("required") ? 400 : 500).json({
                 success: false,
                 message: error.message || "Internal server error"
             });
@@ -159,25 +142,20 @@ module.exports = {
 
     addPatient: async (req, res) => {
         try {
-            let userRole = 'patient'; // Default role
+            let userRole = 'patient';
 
-            // Check for token (optional now)
             const token = req.headers.authorization?.split(' ')[1] || 
                          req.cookies?.adminToken || 
                          req.cookies?.patientToken;
 
-            // If token exists, verify it to get role
             if (token) {
                 try {
                     const decoded = jwt.verify(token, process.env.JWT_SECRET);
                     userRole = decoded.role;
-                    console.log("Token verified, user role:", userRole);
                 } catch (error) {
                     console.log("Token verification failed, proceeding as patient");
                 }
             }
-
-            console.log("Processing request with role:", userRole);
 
             // Create patient data object
             const patientData = {
@@ -188,69 +166,18 @@ module.exports = {
                 medicalDocument: req.body.medicalDocument,
                 roomNumber: req.body.roomNumber,
                 assignedDoctor: req.body.assignedDoctor,
-                medicalHistory: req.body.medicalHistory,
-                // profileimage: req.file.path // Use the uploaded file path
+                medicalHistory: req.body.medicalHistory
             };
 
-            // Add profile image if uploaded
-            if (req.file) {
-                patientData.profileimage = req.file.path;
-            }
-
-            console.log("Validating patient data...");
-            // Validate and create patient with user role
+            // Validate and save patient
             const validatedData = await addpatientService.validatePatientData(patientData, userRole);
-            console.log("Data validated, saving patient...");
-            const patient = await addpatientService.savePatient(validatedData);
+            const result = await addpatientService.savePatient(validatedData);
 
-            // Send success response
-            return res.status(201).json({
-                success: true,
-                message: "Patient added successfully",
-                data: {
-                    _id: patient._id,
-                    fullName: patient.fullName,
-                    age: patient.age,
-                    gender: patient.gender,
-                    bloodGroup: patient.bloodGroup,
-                    admitDate: patient.admitDate,
-                    email: patient.email,
-                    // dateOfBirth: patient.dateOfBirth,
-                    roomNumber: patient.roomNumber,
-                    contactNumber: patient.contactNumber,
-                    medicalCondition: patient.medicalCondition,
-                    ipfsCID: patient.ipfsCID,
-                    ipfsIV: patient.ipfsIV,
-                    createdAt: patient.createdAt,
-                    updatedAt: patient.updatedAt
-                }
-            });
+            return res.status(201).json(result);
 
         } catch (error) {
             console.error("\n=== ERROR IN ADD PATIENT ===", error.message);
-            console.error("Error details:", {
-                message: error.message,
-                stack: error.stack
-            });
-
-            // Handle validation errors
-            if (error.message.includes("Validation failed")) {
-                return res.status(400).json({
-                    success: false,
-                    message: error.message
-                });
-            }
-
-            // Handle token errors - but don't return 401 since token is optional
-            if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-                console.log("Token error, proceeding as regular patient");
-            }
-
-            // Handle other errors
-            const statusCode = error.message.includes("required") ||
-                error.message.includes("exists") ? 400 : 500;
-
-            return res.status(statusCode).json({
+            return res.status(error.message.includes("required") ? 400 : 500).json({
                 success: false,
                 message: error.message || "Internal server error"
             });
@@ -282,7 +209,6 @@ module.exports = {
         try {
             const { fullName } = req.params;
             
-            // Input validation
             if (!fullName) {
                 return res.status(400).json({
                     success: false,
@@ -302,7 +228,7 @@ module.exports = {
             // Get patient data from service
             const { patient, ipfsData } = await readpatientdataByName.readpatientdataByName(fullName);
 
-            // Format response
+            // Format response with data from IPFS
             return res.status(200).json({
                 success: true,
                 message: "Patient data retrieved successfully",
@@ -310,13 +236,13 @@ module.exports = {
                     _id: patient._id,
                     fullName: patient.fullName,
                     email: patient.email,
-                    medicalDocument: patient.medicalDocument,
-                    // Include sensitive data from IPFS
+                    // Include data from IPFS
                     admitDate: ipfsData.admitDate,
                     medicalCondition: ipfsData.medicalCondition,
                     roomNumber: ipfsData.roomNumber,
                     assignedDoctor: ipfsData.assignedDoctor,
-                    profileimage: ipfsData.profileimage,
+                    medicalHistory: ipfsData.medicalHistory,
+                    medicalDocument: ipfsData.medicalDocument,
                     createdAt: patient.createdAt,
                     updatedAt: patient.updatedAt
                 }
@@ -331,32 +257,29 @@ module.exports = {
     },
     readAllpatientdata: async (req, res) => {
         try {
-            // Extract filters from query parameters
             const filters = {
                 fullName: req.query.fullName
             };
+            
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 10;
 
-            console.log('Received filters:', filters);
+            const result = await readAllpatientdata.readAllpatientdata(filters, page, limit);
 
-            // Get all patients data from service with filters
-            const result = await readAllpatientdata.readAllpatientdata(filters);
-
-            // Check if the operation was successful
             if (!result.success) {
                 return res.status(400).json(result);
             }
 
-            // Return the result directly since it's already formatted in the service
             return res.status(200).json({
                 success: true,
                 message: result.message,
                 count: result.data.length,
-                data: result.data
+                data: result.data,
+                pagination: result.pagination
             });
 
         } catch (error) {
             console.error("Controller: Error in readAllpatientdata:", error);
-            
             return res.status(500).json({
                 success: false,
                 message: error.message || "Error retrieving patients data"
@@ -368,7 +291,6 @@ module.exports = {
             const { fullName } = req.params;
             const updateData = req.body;
 
-            // Validate input
             if (!fullName) {
                 return res.status(400).json({
                     success: false,
@@ -376,35 +298,37 @@ module.exports = {
                 });
             }
 
-            // Validate update data
-            const allowedFields = ['age', 'gender', 'bloodGroup', 'medicalCondition', 'admitDate', 'assignedDoctor', 'roomNumber', 'contactNumber'];
+            // Validate update data - only allow specific fields
+            const allowedFields = ['medicalCondition', 'roomNumber', 'assignedDoctor'];
             const updateFields = Object.keys(updateData);
             const invalidFields = updateFields.filter(field => !allowedFields.includes(field));
 
             if (invalidFields.length > 0) {
                 return res.status(400).json({
                     success: false,
-                    message: `Invalid fields: ${invalidFields.join(', ')}`
+                    message: `Invalid fields: ${invalidFields.join(', ')}. Only medicalCondition, roomNumber, and assignedDoctor can be updated.`
                 });
             }
 
             // Update patient data
             const { patient, ipfsData } = await updatePatientService.updatePatientData(fullName, updateData);
 
-            // Format response
+            // Format response with data from IPFS
             return res.status(200).json({
                 success: true,
                 message: "Patient data updated successfully",
                 data: {
+                    patientId: patient.patientId,
                     _id: patient._id,
                     fullName: patient.fullName,
                     email: patient.email,
-                    admitDate: ipfsData.admitDate,
+                    ipfsCID: patient.ipfsCID,
+                    ipfsIV: patient.ipfsIV,
+                    version: patient.version,
                     medicalCondition: ipfsData.medicalCondition,
                     roomNumber: ipfsData.roomNumber,
                     assignedDoctor: ipfsData.assignedDoctor,
-                    bloodGroup: ipfsData.bloodGroup,
-                    phoneNumber: ipfsData.phoneNumber,
+                    createdAt: patient.createdAt,
                     updatedAt: patient.updatedAt
                 }
             });
@@ -459,5 +383,111 @@ module.exports = {
                 message: error.message || "Failed to fetch dashboard data"
             });
         }
+    },
+    getPatientSensitiveData: async (req, res) => {
+        try {
+            const { cid } = req.params;
+
+            if (!cid) {
+                return res.status(400).json({
+                    success: false,
+                    message: "CID is required"
+                });
+            }
+
+            // Get sensitive data from IPFS using only CID
+            const result = await getPatientSensitiveData.getPatientSensitiveData(cid);
+
+            return res.status(200).json({
+                success: true,
+                message: "Patient sensitive data retrieved successfully",
+                data: result.data
+            });
+
+        } catch (error) {
+            console.error("Error in getPatientSensitiveData:", error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error retrieving patient sensitive data"
+            });
+        }
+    },
+    transferPatientByEmail: async (req, res) => {
+        try {
+            const { email } = req.params;
+            const signupPatient = await patientSignup.findOne({ email });
+            const existingAddPatient = await addpatientModel.findOne({ email });
+
+            if (!signupPatient) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Patient not found in signup collection"
+                });
+            }
+
+            // If patient already exists in addpatientModel, return existing data
+            if (existingAddPatient) {
+                return res.status(200).json({
+                    success: true,
+                    message: "Patient already exists in addpatient collection",
+                    data: existingAddPatient
+                });
+            }
+
+            // Fields to keep in main document
+            const publicFields = ['UUID', 'patientId', 'ipfsCID', 'ipfsIV', 'email', 'fullName'];
+            
+            // Prepare sensitive data (everything except public fields)
+            const sensitiveData = {};
+            const signupData = signupPatient.toObject();
+            
+            for (const key in signupData) {
+                if (!publicFields.includes(key) && key !== '__v') {
+                    sensitiveData[key] = signupData[key];
+                }
+            }
+
+            // Encrypt sensitive data
+            const encrypted = await encryptionService.encrypt(sensitiveData);
+
+            // Get IPFS CID from signup patient if it exists
+            const ipfsCID = signupPatient.ipfsCID || null;
+            const ipfsIV = signupPatient.ipfsIV || encrypted.iv;
+
+            // Create new patient document
+            const newPatient = {
+                UUID: signupPatient._id, // Keep the same UUID
+                patientId: signupPatient._id, // Use signup _id as patientId
+                fullName: signupPatient.fullName,
+                email: signupPatient.email,
+                ipfsCID: ipfsCID, // Use original IPFS CID if it exists
+                ipfsIV: ipfsIV, // Use original IV if it exists
+                sensitiveData: {
+                    encryptedData: encrypted.encryptedData,
+                    iv: encrypted.iv
+                },
+                version: 1 // Add version tracking
+            };
+
+            // Save to addpatientModel
+            const savedPatient = await addpatientModel.create(newPatient);
+
+            return res.status(200).json({
+                success: true,
+                message: "Patient data transferred successfully",
+                data: {
+                    ...savedPatient.toObject(),
+                    sensitiveData: sensitiveData // Include decrypted sensitive data in response
+                }
+            });
+
+        } catch (error) {
+            console.error('Error in transferPatientByEmail:', error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
     }
+    
 };

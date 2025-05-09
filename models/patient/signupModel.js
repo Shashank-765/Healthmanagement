@@ -9,12 +9,12 @@ const patientSignupSchema = new mongoose.Schema({
     },
     gender: {
         type: String,
-        required: [true, 'Gender is required'],
+        // required: [true, 'Gender is required'],
         enum: ['Male', 'Female', 'Other']
     },
     dateOfBirth: {
         type: Date,
-        required: [true, 'Date of birth is required']
+        // required: [true, 'Date of birth is required']
     },
     age: {
         type: Number,
@@ -34,7 +34,7 @@ const patientSignupSchema = new mongoose.Schema({
     },
     phoneNumber: {
         type: String,
-        required: [true, 'phoneNumber is required'],
+        // required: [true, 'phoneNumber is required'],
         validate: {
             validator: function(v) {
                 return /^\d{10}$/.test(v);
@@ -57,27 +57,22 @@ const patientSignupSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: [true, 'password is required'],
+        // required: [true, 'password is required'],
         minlength: [8, 'Password must be at least 8 characters long']
-    },
-    walletAddress: {
-        type: String,
-        unique: true,
-        trim: true
     },
     // Medical Information
     medicalDocument: {
         type: String,
-        required: [true, 'Medical document is required']
+        // required: [true, 'Medical document is required']
     },
     bloodGroup: {
         type: String,
         enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
-        required: [true, 'Blood group is required']
+        // required: [true, 'Blood group is required']
     },
     emergencyContactNumber: {
         type: String,
-        required: [true, 'Emergency contact number is required'],
+        // required: [true, 'Emergency contact number is required'],
         validate: {
             validator: function(v) {
                 return /^\d{10}$/.test(v);
@@ -87,15 +82,15 @@ const patientSignupSchema = new mongoose.Schema({
     },
     knownAllergies: {
         type: String,
-        required: [true, 'Known allergies information is required']
+        // required: [true, 'Known allergies information is required']
     },
     currentMedication: {
         type: String,
-        required: [true, 'Current medication information is required']
+        // required: [true, 'Current medication information is required']
     },
     medicalHistory: {
         type: String,
-        required: [true, 'medicalHistory is required']
+        // required: [true, 'medicalHistory is required']
     },
     ipfsCID: {
         type: String,
@@ -124,6 +119,27 @@ patientSignupSchema.pre('save', async function(next) {
     }
     next();
 });
+
+// Drop the walletAddress index if it exists
+const dropWalletAddressIndex = async () => {
+    try {
+        const collection = mongoose.connection.collection('patientsignups');
+        const indexes = await collection.indexes();
+        const walletAddressIndex = indexes.find(index => 
+            index.key && index.key.walletAddress === 1
+        );
+        
+        if (walletAddressIndex) {
+            await collection.dropIndex('walletAddress_1');
+            console.log('Successfully dropped walletAddress index');
+        }
+    } catch (error) {
+        console.error('Error dropping walletAddress index:', error);
+    }
+};
+
+// Call the function when the model is initialized
+dropWalletAddressIndex();
 
 const PatientSignup = mongoose.model('PatientSignup', patientSignupSchema);
 module.exports = PatientSignup;

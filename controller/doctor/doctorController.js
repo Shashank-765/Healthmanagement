@@ -37,22 +37,18 @@ module.exports = {
             // Create doctor with sensitive data in IPFS
             const doctor = await doctorSignupService.createDoctor(validatedData);
 
-            // Prepare response data
-            const doctorResponse = doctor.toObject();
-            delete doctorResponse.__v;
-            delete doctorResponse.password;
-
-            // Send success response
+            // Send success response with only non-sensitive data
             res.status(201).json({
                 statusCode: 201,
                 message: "Doctor signup successful",
                 data: {
-                    doctor: {
-                        ...doctorResponse,
-                        walletAddress: doctor.walletAddress,
-                        medicalDocument: doctor.medicalDocument
-                    },
-                    fileInfo
+                    _id: doctor._id,
+                    fullName: doctor.fullName,
+                    email: doctor.email,
+                    ipfsCID: doctor.ipfsCID,
+                    ipfsIV: doctor.ipfsIV,
+                    createdAt: doctor.createdAt,
+                    updatedAt: doctor.updatedAt
                 }
             });
 
@@ -81,11 +77,17 @@ module.exports = {
         try {
             const { email, password } = req.body;
 
+            if (!email || !password) {
+                return res.status(400).json({
+                    statusCode: 400,
+                    message: "Please provide both email and password"
+                });
+            }
+
             // Validate login credentials
             const doctor = await doctorLoginService.validateLogin(email, password);
-            console.log(doctor, "<<<===doctor");
-
-            // Generate token with role
+            
+            // Generate token
             const token = jwt.sign(
                 { 
                     id: doctor._id,
@@ -95,11 +97,11 @@ module.exports = {
                 { expiresIn: '30d' }
             );
 
-            // If login successful, create or update login record
+            // Create or update login record
             const loginData = {
                 email: doctor.email,
-                password: doctor.password,
-                token: token
+                token: token,
+                lastLogin: new Date()
             };
 
             await doctorLogin.findOneAndUpdate(
@@ -113,11 +115,15 @@ module.exports = {
                 statusCode: 200,
                 message: "Doctor login successful",
                 data: {
+                    _id: doctor._id,
+                    fullName: doctor.fullName,
                     email: doctor.email,
-                    password: doctor.password,
+                    specialization: doctor.specialization,
+                    isProfileComplete: doctor.isProfileComplete,
                     token
                 }
             });
+
         } catch (error) {
             console.error('Doctor login error:', error);
             const statusCode = error.message.includes("Invalid") ? 401 : 500;
@@ -201,22 +207,43 @@ module.exports = {
 
     getDoctors: async (req, res) => {
         try {
-            // Extract filters from query parameters
             const filters = {
                 specialization: req.query.specialization,
                 fullName: req.query.fullName
             };
 
+            // Pagination
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 10;
+            const skip = (page - 1) * limit;
+
             console.log('Received filters:', filters);
 
-            const doctors = await doctorManagementService.getDoctors(filters);
+            // Count total matching docs
+            const totalCount = await adddoctorModel.countDocuments({
+                ...(filters.specialization ? { specialization: { $regex: new RegExp(filters.specialization, 'i') } } : {}),
+                ...(filters.fullName ? { fullName: { $regex: new RegExp(filters.fullName, 'i') } } : {})
+            });
 
-            // If no doctors found with filters, return appropriate response
+            // Fetch paginated docs
+            const doctors = await adddoctorModel.find({
+                ...(filters.specialization ? { specialization: { $regex: new RegExp(filters.specialization, 'i') } } : {}),
+                ...(filters.fullName ? { fullName: { $regex: new RegExp(filters.fullName, 'i') } } : {})
+            })
+                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean();
+
             if (doctors.length === 0) {
                 return res.status(200).json({
                     success: true,
                     message: "No doctors found with the given filters",
-                    data: []
+                    data: [],
+                    totalCount,
+                    totalPages: Math.ceil(totalCount / limit),
+                    page
                 });
             }
 
@@ -224,7 +251,10 @@ module.exports = {
                 success: true,
                 message: "Doctors fetched successfully",
                 count: doctors.length,
-                data: doctors
+                data: doctors,
+                totalCount,
+                totalPages: Math.ceil(totalCount / limit),
+                page
             });
         } catch (error) {
             console.error('Error in getDoctors controller:', error);
@@ -338,9 +368,38 @@ module.exports = {
                 });
             }
 
+            // Try to find doctor in adddoctorModel
+            let doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+            if (!doctor) {
+                // If not found, try to find in signup
+                const signupDoctor = await doctorSignup.findOne({ email: doctorEmail.toLowerCase().trim() });
+                if (signupDoctor) {
+                    // Prepare data for adddoctorModel (map fields as needed)
+                    const addDoctorData = {
+                        fullName: signupDoctor.fullName,
+                        email: signupDoctor.email,
+                        specialization: signupDoctor.specialization,
+                        experience: signupDoctor.yearsOfExperience,
+                        availability: "Available",
+                        contactnumber: signupDoctor.contactNumber,
+                        qualification: "MBBS",
+                        address: "Not provided",
+                        bio: "",
+                        profileimage: "",
+                        // Add other fields as needed
+                    };
+                    await adddoctorModel.create(addDoctorData);
+                    // Now fetch the doctor again from adddoctorModel
+                    doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+                } else {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Doctor not found in signup"
+                    });
+                }
+            }
+
             // Fetch dashboard data by email
-            console.log('Looking for doctor with email:', doctorEmail);
-            const doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
             const dashboardData = await getDoctorDashboardData(doctorEmail || req.user.email);
             res.status(200).json(dashboardData);
         } catch (error) {
@@ -377,7 +436,7 @@ module.exports = {
     readDoctorsByEmail: async (req, res) => {
         try {
             const { email } = req.params;
-            
+
             // First check in signup collection
             const signupDoctor = await doctorSignup.findOne({ email });
             

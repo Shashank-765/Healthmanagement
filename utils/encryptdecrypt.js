@@ -35,6 +35,11 @@ class EncryptionService {
 
     async decrypt(encryptedData, iv) {
         try {
+            if (!encryptedData || !iv) {
+                console.log('No encrypted data or IV provided');
+                return null;
+            }
+
             const decipher = crypto.createDecipheriv(
                 this.algorithm,
                 this.key,
@@ -45,7 +50,7 @@ class EncryptionService {
             return JSON.parse(decrypted);
         } catch (error) {
             console.error('Decryption error:', error);
-            throw new Error('Decryption failed');
+            return null; // Return null instead of throwing error
         }
     }
 

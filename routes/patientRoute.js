@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const patientController = require('../controller/patient/patientController');
 const upload = require('../utils/multer');
-const authMiddleware = require('../middleware/middleware');
-const { authenticateToken } = require('../middleware/auth');
+// const authMiddleware = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/middleware');
 
 // Error handling middleware for multer
 const handleMulterError = (err, req, res, next) => {
@@ -19,10 +19,10 @@ const handleMulterError = (err, req, res, next) => {
 
 // Form data parsing middleware
 const parseFormData = (req, res, next) => {
-   next();
+    next();
 };
 
-// Use upload.single for single file upload with error handling
+// Public routes
 router.post("/signup", 
     upload.single('medicalDocument'),
     handleMulterError,
@@ -31,17 +31,17 @@ router.post("/signup",
 );
 
 router.post('/patientlogin', patientController.patientLogin);
-// Route to get sensitive data
-router.get('/:cid/sensitive-data', 
-    authMiddleware.authenticateToken,
-    patientController.getSensitiveData
-);
 
-// Route to get patient data
+// Protected routes
+router.get('/patient-dashboard', authenticateToken, patientController.getPatientDashboard);
+
+router.get('/sensitive-data/:cid', authenticateToken, patientController.getSensitiveData);
+
 router.post('/addpatient', 
     upload.single('profileimage'),
     handleMulterError,
     parseFormData,
+    authenticateToken,
     patientController.addPatient
 );
 //for ipfs data
@@ -52,8 +52,10 @@ router.get('/patientdata/:fullName', patientController.readpatientdataByName);
 router.put('/update/:fullName', patientController.updatePatientData);
 router.delete('/delete-patientdata/:fullName', patientController.deletePatientData);
 
-// Add these new routes while keeping existing ones
+// Add these new routes while kaeeping existing ones
 router.post('/assign-primary-doctor', patientController.assignPrimaryDoctor);
-router.get('/patient-dashboard', authMiddleware.authenticateToken, patientController.getPatientDashboard);
+router.get('/patient-dashboard',authenticateToken, patientController.getPatientDashboard);
 // router.post('/add-appointment', patientController.addAppointmentToPatient);
+// router.get('/sensitive-data/:cid', patientController.getPatientSensitiveData);
+router.get('/transfer-patient/:email', authenticateToken, patientController.transferPatientByEmail);
 module.exports = router;

@@ -51,7 +51,10 @@ router.put('/update-status',
     appointmentController.updateAppointmentStatus
 );
 
-router.delete('/delete-appointment/id/:id', authenticateToken, appointmentController.deleteAppointmentById);
+router.delete('/delete-appointment/:id',
+    authenticateToken,
+    appointmentController.deleteAppointmentById
+);
 
 // Cancel appointment (doctor only)
 router.post('/cancel-appointment', 
