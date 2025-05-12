@@ -365,47 +365,40 @@ const medicalHistoryService = {
                 throw new Error('IPFS upload failed - missing CID or IV');
             }
 
-            // Store current CID and IV in history link
-            const historyLink = {
-                previousCID: currentHistory.ipfsCID,
-                previousIV: currentHistory.ipfsIV,
-                date: new Date()
-            };
-
-            // Update the record with new data and history link
-            console.log('5. Updating database record');
-            const updatedHistory = await medicalHistoryModel.findByIdAndUpdate(
-                id,
-                {
-                    ipfsCID: cid,
-                    ipfsIV: iv,
-                    version: sensitiveData.version,
-                    hl: historyLink,
-                    updatedAt: new Date(),
-                    condition: updateData.condition,
-                    notes: updateData.notes,
-                    date: updateData.date || new Date()
+            // Create new history record with updated version
+            console.log('5. Creating new history record');
+            const newHistory = new medicalHistoryModel({
+                patientId: currentHistory.patientId,
+                doctorId: currentHistory.doctorId,
+                ipfsCID: cid,
+                ipfsIV: iv,
+                version: sensitiveData.version,
+                hl: {
+                    previousCID: currentHistory.ipfsCID,
+                    previousIV: currentHistory.ipfsIV,
+                    date: new Date()
                 },
-                { new: true }
-            );
+                date: updateData.date || new Date()
+            });
 
-            if (!updatedHistory) {
-                console.log('❌ Failed to update record');
-                throw new Error('Failed to update medical history record');
-            }
-            console.log('✅ Database update successful');
+            // Save the new record
+            console.log('6. Saving new record');
+            const savedHistory = await newHistory.save();
+            console.log('✅ New record saved:', savedHistory._id);
 
-            // Populate and decrypt
-            console.log('6. Populating and decrypting data');
-            const populatedHistory = await medicalHistoryModel.findById(updatedHistory._id)
+            // Populate the record
+            console.log('7. Populating record');
+            const populatedHistory = await medicalHistoryModel.findById(savedHistory._id)
                 .populate('patientId', 'fullName email')
                 .populate('doctorId', 'fullName email');
 
             if (!populatedHistory) {
-                console.log('❌ Failed to retrieve updated record');
-                throw new Error('Failed to retrieve updated medical history');
+                console.log('❌ Failed to retrieve saved record');
+                throw new Error('Failed to retrieve saved medical history');
             }
 
+            // Decrypt IPFS data for response
+            console.log('8. Decrypting IPFS data');
             const ipfsData = await IPFSService.retrieveAndDecrypt(cid, iv);
             console.log('✅ Data decryption successful');
 
@@ -415,10 +408,7 @@ const medicalHistoryService = {
                 message: 'Medical history updated successfully',
                 data: {
                     ...populatedHistory.toObject(),
-                    ...ipfsData,
-                    condition: ipfsData.condition || updateData.condition,
-                    notes: ipfsData.notes || updateData.notes,
-                    date: ipfsData.date || updateData.date
+                    ...ipfsData
                 }
             };
         } catch (error) {
@@ -468,26 +458,51 @@ const medicalHistoryService = {
             console.log('Fetching medical history for doctor:', doctorId);
             
             const records = await medicalHistoryModel.find({ doctorId })
-                .populate('patientId', 'fullName email')
-                .populate('doctorId', 'fullName email')
-                .sort({ createdAt: -1 });
+                .populate({
+                    path: 'patientId',
+                    model: 'AddPatient',
+                    select: 'fullName email'
+                })
+                .populate({
+                    path: 'doctorId',
+                    model: 'adddoctor',
+                    select: 'fullName email'
+                })
+                .lean();
 
-            console.log(`Found ${records.length} records`);
+            console.log(`2. Found ${records.length} records`);
+            console.log('Sample record:', records[0]);
 
             // Decrypt IPFS data for each record
             const decryptedRecords = await Promise.all(
                 records.map(async (record) => {
                     try {
                         const ipfsData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
+                        
+                        // Extract patient and doctor info
+                        const patientInfo = record.patientId || {};
+                        const doctorInfo = record.doctorId || {};
+                        
                         return {
-                            ...record.toObject(),
-                            ...ipfsData
+                            ...record,
+                            ...ipfsData,
+                            patientName: patientInfo.fullName,
+                            doctorName: doctorInfo.fullName,
+                            patientId: patientInfo._id || record.patientId,
+                            doctorId: doctorInfo._id || record.doctorId
                         };
                     } catch (error) {
                         console.error(`Error decrypting record ${record._id}:`, error);
+                        const patientInfo = record.patientId || {};
+                        const doctorInfo = record.doctorId || {};
+                        
                         return {
-                            ...record.toObject(),
-                            error: 'Failed to decrypt data'
+                            ...record,
+                            error: 'Failed to decrypt data',
+                            patientName: patientInfo.fullName,
+                            doctorName: doctorInfo.fullName,
+                            patientId: patientInfo._id || record.patientId,
+                            doctorId: doctorInfo._id || record.doctorId
                         };
                     }
                 })
@@ -501,6 +516,36 @@ const medicalHistoryService = {
         } catch (error) {
             console.error('Error in getMedicalHistoryByDoctor:', error);
             throw new Error(`Failed to fetch medical history: ${error.message}`);
+        }
+    },
+
+    getIPFSDataByCID: async (cid, iv) => {
+        try {
+            console.log('=== Starting IPFS Data Decryption ===');
+            console.log('1. Input:', { cid, iv });
+
+            if (!cid || !iv) {
+                throw new Error('CID and IV are required');
+            }
+
+            // Decrypt data from IPFS
+            console.log('2. Decrypting data from IPFS');
+            const decryptedData = await IPFSService.retrieveAndDecrypt(cid, iv);
+            console.log('3. Decrypted data:', decryptedData);
+
+            return {
+                success: true,
+                message: "IPFS data decrypted successfully",
+                data: {
+                    cid,
+                    iv,
+                    decryptedData,
+                    timestamp: new Date().toISOString()
+                }
+            };
+        } catch (error) {
+            console.error('Error in getIPFSDataByCID:', error);
+            throw new Error(`Failed to decrypt IPFS data: ${error.message}`);
         }
     }
 };

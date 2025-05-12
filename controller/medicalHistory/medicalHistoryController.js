@@ -330,35 +330,15 @@ const medicalHistoryController = {
             const updatedHistory = await medicalHistoryService.editMedicalHistory(record._id, updateData);
             console.log('✅ Service update successful');
 
-            // 6. Decrypt IPFS data for response
-            console.log('7. Decrypting IPFS data');
-            let decryptedData = {};
-            try {
-                if (updatedHistory.data.ipfsCID && updatedHistory.data.ipfsIV) {
-                    decryptedData = await IPFSService.retrieveAndDecrypt(
-                        updatedHistory.data.ipfsCID,
-                        updatedHistory.data.ipfsIV
-                    );
-                    console.log('✅ IPFS data decrypted successfully');
-                }
-            } catch (error) {
-                console.error('❌ Error decrypting IPFS data:', error);
-                // Continue with the response even if decryption fails
-            }
-
-            // 7. Send response with decrypted data
-            console.log('8. Sending response');
+            // 6. Send response
+            console.log('7. Sending response');
             res.status(200).json({
                 success: true,
                 message: "Medical history updated successfully",
                 data: {
                     ...updatedHistory.data,
-                    ...decryptedData, // Include decrypted data
                     patientName: patient.fullName,
-                    doctorName: doctor.fullName,
-                    condition: decryptedData.condition || updatedHistory.data.condition,
-                    notes: decryptedData.notes || updatedHistory.data.notes,
-                    date: decryptedData.date || updatedHistory.data.date
+                    doctorName: doctor.fullName
                 }
             });
             console.log('=== Medical History Edit Controller Complete ===\n');
@@ -388,9 +368,12 @@ const medicalHistoryController = {
     },
     getMedicalHistoryByDoctor: async (req, res) => {
         try {
+            console.log('\n=== Starting getMedicalHistoryByDoctor Controller ===');
             const email = req.params.email;
+            console.log('1. Doctor email:', email);
 
             if (!email) {
+                console.log('❌ No email provided');
                 return res.status(400).json({
                     success: false,
                     message: "Email is required"
@@ -398,11 +381,13 @@ const medicalHistoryController = {
             }
 
             // Find doctor using email
+            console.log('2. Finding doctor by email');
             const doctor = await adddoctorModel.findOne({ 
                 email: email.toLowerCase()
             });
 
             if (!doctor) {
+                console.log('❌ Doctor not found');
                 return res.status(404).json({
                     success: false,
                     message: "Doctor not found"
@@ -410,76 +395,65 @@ const medicalHistoryController = {
             }
 
             // Get all medical history records for this doctor
-            const records = await medicalHistoryModel.find({ 
-                doctorId: doctor._id 
-            }).sort({ version: -1 });
+            console.log('3. Fetching medical history records');
+            const result = await medicalHistoryService.getMedicalHistoryByDoctor(doctor._id);
+            console.log('4. Records fetched:', result.data?.length || 0);
 
-            if (!records || records.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    message: "No medical history records found",
-                    data: []
+            if (!result.success) {
+                console.log('❌ Service returned error');
+                return res.status(500).json(result);
+            }
+
+            // Group records by patient
+            console.log('5. Grouping records by patient');
+            const groupedRecords = {};
+            
+            for (const record of result.data) {
+                const patientId = record.patientId;
+                const patientName = record.patientName;
+                const doctorName = record.doctorName;
+                
+                console.log('Processing record:', { 
+                    patientId, 
+                    patientName, 
+                    doctorName,
+                    record: {
+                        patientId: record.patientId,
+                        patientName: record.patientName,
+                        doctorName: record.doctorName
+                    }
+                });
+                
+                if (!groupedRecords[patientId]) {
+                    groupedRecords[patientId] = {
+                        patientId,
+                        patientName,
+                        doctorName,
+                        historyChain: []
+                    };
+                }
+
+                groupedRecords[patientId].historyChain.push({
+                    _id: record._id,
+                    version: record.version || 1,
+                    condition: record.condition || 'N/A',
+                    notes: record.notes || 'N/A',
+                    date: record.date || new Date(),
+                    ipfsCID: record.ipfsCID,
+                    ipfsIV: record.ipfsIV,
+                    createdAt: record.createdAt,
+                    updatedAt: record.updatedAt
                 });
             }
 
-            // Process records and create version chains
-            const groupedRecords = {};
-            
-            for (const record of records) {
-                if (!record.patientId) {
-                    continue;
-                }
-
-                const key = record.patientId.toString();
-                
-                // Get patient details
-                const patient = await AddPatient.findById(record.patientId);
-                if (!patient) {
-                    continue;
-                }
-
-                if (!groupedRecords[key]) {
-                    groupedRecords[key] = [];
-                }
-
-                // Format dates
-                const recordDate = record.date;
-                const formattedDate = recordDate ? new Date(recordDate).toLocaleDateString() : 'Date not available';
-
-                // Create history record with all details
-                const historyRecord = {
-                    _id: record._id.toString(),
-                    patientId: record.patientId.toString(),
-                    doctorId: record.doctorId.toString(),
-                    patientName: patient.fullName,
-                    doctorName: doctor.fullName,
-                    ipfsCID: record.ipfsCID,
-                    ipfsIV: record.ipfsIV,
-                    version: record.version || 1,
-                    condition: record.condition || 'Not available',
-                    notes: record.notes || 'Not available',
-                    date: formattedDate,
-                    hl: {
-                        previousCID: record.hl?.previousCID || null,
-                        previousIV: record.hl?.previousIV || null,
-                        date: formattedDate
-                    },
-                    createdAt: new Date(record.createdAt).toLocaleDateString(),
-                    updatedAt: new Date(record.updatedAt).toLocaleDateString()
-                };
-
-                // Add to grouped records
-                groupedRecords[key].push(historyRecord);
-            }
-
-            // Convert grouped records to array format
-            const formattedRecords = Object.entries(groupedRecords).map(([patientId, patientRecords]) => ({
-                patientId,
-                patientName: patientRecords[0].patientName,
-                doctorName: patientRecords[0].doctorName,
-                historyChain: patientRecords.sort((a, b) => b.version - a.version) // Sort by version in descending order
+            // Sort history chains by version
+            console.log('6. Sorting history chains');
+            const formattedRecords = Object.values(groupedRecords).map(group => ({
+                ...group,
+                historyChain: group.historyChain.sort((a, b) => b.version - a.version)
             }));
 
+            console.log('7. Sending response');
             res.status(200).json({
                 success: true,
                 message: "Medical history fetched successfully",
