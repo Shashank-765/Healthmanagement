@@ -68,7 +68,7 @@ const addpatientSchema = new mongoose.Schema({
     },
     fullName: {
         type: String,
-        // required: true
+        required: true
     },
     email: {
         type: String,
@@ -83,12 +83,10 @@ const addpatientSchema = new mongoose.Schema({
         }
     },
     ipfsCID: {
-        type: String,
-        // required: true
+        type: String
     },
     ipfsIV: {
-        type: String,
-        // required: true
+        type: String
     },
     appointments: [{
         type: mongoose.Schema.Types.ObjectId,
@@ -99,6 +97,14 @@ const addpatientSchema = new mongoose.Schema({
         ref: 'Doctor'
     }
 }, { timestamps: true });
+
+// Add pre-save middleware to ensure patientId is set
+addpatientSchema.pre('save', function(next) {
+    if (!this.patientId) {
+        this.patientId = this._id;
+    }
+    next();
+});
 
 const AddPatient = mongoose.model("AddPatient", addpatientSchema);
 

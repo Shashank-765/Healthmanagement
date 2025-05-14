@@ -721,7 +721,7 @@ module.exports = {
                 }
             });
         } catch (error) {
-            console.error('Error fetching patient medical history:', error);
+            // console.error('Error fetching patient medical history:', error);
             res.status(500).json({
                 success: false,
                 message: "Error fetching patient medical history",

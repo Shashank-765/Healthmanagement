@@ -251,8 +251,8 @@ const createdDoctor = {
                 throw new Error("Doctor profile already exists");
             }
 
-            // Basic data that will always be included
-            let returnData = {
+            // Prepare data for MongoDB (non-sensitive)
+            const mongoData = {
                 fullName: doctorData.fullName,
                 email: doctorData.email,
                 specialization: doctorData.specialization,
@@ -265,120 +265,59 @@ const createdDoctor = {
                 profileimage: doctorData.profileimage || null
             };
 
+            // Prepare sensitive data for IPFS
+            const sensitiveData = {
+                specialization: doctorData.specialization,
+                experience: doctorData.experience || 0,
+                contactnumber: contactnumber,
+                qualification: doctorData.qualification,
+                address: doctorData.address,
+                bio: doctorData.bio,
+                profileimage: doctorData.profileimage || null
+            };
+
             // Only include signup data if doctor exists in signup database
             if (signedUpDoctor) {
-                returnData = {
-                    ...returnData,
-                    password: signedUpDoctor.password,
-                    medicalLicenseNumber: signedUpDoctor.medicalLicenseNumber,
-                    medicalDocument: signedUpDoctor.medicalDocument,
-                    walletAddress: signedUpDoctor.walletAddress,
-                    gender: signedUpDoctor.gender,
-                    dateOfBirth: signedUpDoctor.dateOfBirth,
-                    age: signedUpDoctor.age,
-                    hospitalClinicName: signedUpDoctor.hospitalClinicName
-                };
-            } else {
-                // For new doctors, set default values for required fields
-                returnData = {
-                    ...returnData,
-                    password: doctorData.password || null,
-                    medicalLicenseNumber: doctorData.medicalLicenseNumber || null,
-                    medicalDocument: doctorData.medicalDocument || null,
-                    walletAddress: doctorData.walletAddress || null,
-                    gender: doctorData.gender || null,
-                    dateOfBirth: doctorData.dateOfBirth || null,
-                    age: doctorData.age || null,
-                    hospitalClinicName: doctorData.hospitalClinicName || null
-                };
+                // Add additional sensitive data from signup
+                sensitiveData.password = signedUpDoctor.password;
+                sensitiveData.medicalLicenseNumber = signedUpDoctor.medicalLicenseNumber;
+                sensitiveData.medicalDocument = signedUpDoctor.medicalDocument;
+                sensitiveData.walletAddress = signedUpDoctor.walletAddress;
+                sensitiveData.gender = signedUpDoctor.gender;
+                sensitiveData.dateOfBirth = signedUpDoctor.dateOfBirth;
+                sensitiveData.age = signedUpDoctor.age;
+                sensitiveData.hospitalClinicName = signedUpDoctor.hospitalClinicName;
             }
 
-            return returnData;
+            return {
+                mongoData,
+                sensitiveData
+            };
         } catch (error) {
             throw error;
         }
     },
 
-    saveDoctor: async (validatedDoctorData) => {
+    saveDoctor: async (validatedData) => {
         try {
-            // Create MongoDB document with basic data
-            const mongoData = {
-                fullName: validatedDoctorData.fullName,
-                email: validatedDoctorData.email,
-                specialization: validatedDoctorData.specialization,
-                experience: validatedDoctorData.experience,
-                availability: validatedDoctorData.availability,
-                contactnumber: validatedDoctorData.contactnumber,
-                qualification: validatedDoctorData.qualification,
-                address: validatedDoctorData.address,
-                bio: validatedDoctorData.bio,
-                profileimage: validatedDoctorData.profileimage
-            };
+            console.log('Saving doctor with data:', validatedData);
+            
+            // Upload sensitive data to IPFS
+            const ipfsResult = await IPFSService.uploadEncryptedData(validatedData.sensitiveData);
 
-            // If we have signup data, include it
-            if (validatedDoctorData.password) {
-                mongoData.password = validatedDoctorData.password;
-                mongoData.medicalLicenseNumber = validatedDoctorData.medicalLicenseNumber;
-                mongoData.medicalDocument = validatedDoctorData.medicalDocument;
-                mongoData.walletAddress = validatedDoctorData.walletAddress;
-                mongoData.gender = validatedDoctorData.gender;
-                mongoData.dateOfBirth = validatedDoctorData.dateOfBirth;
-                mongoData.age = validatedDoctorData.age;
-                mongoData.hospitalClinicName = validatedDoctorData.hospitalClinicName;
-            }
+            // Create MongoDB document with basic data + IPFS references
+            const mongoData = {
+                ...validatedData.mongoData,
+                ipfsCID: ipfsResult.cid,
+                ipfsIV: ipfsResult.iv
+            };
 
             // Create doctor in MongoDB
             const doctor = await adddoctorModel.create(mongoData);
 
-            // Store data in IPFS only if we have signup data
-            if (validatedDoctorData.password) {
-                const allData = {
-                    // Basic info
-                    fullName: validatedDoctorData.fullName,
-                    email: validatedDoctorData.email,
-                    password: validatedDoctorData.password,
-                    
-                    // Additional info
-                    specialization: validatedDoctorData.specialization,
-                    experience: validatedDoctorData.experience,
-                    availability: validatedDoctorData.availability,
-                    contactnumber: validatedDoctorData.contactnumber,
-                    qualification: validatedDoctorData.qualification,
-                    address: validatedDoctorData.address,
-                    bio: validatedDoctorData.bio,
-                    profileimage: validatedDoctorData.profileimage,
-                    
-                    // Original signup data
-                    medicalLicenseNumber: validatedDoctorData.medicalLicenseNumber,
-                    medicalDocument: validatedDoctorData.medicalDocument,
-                    walletAddress: validatedDoctorData.walletAddress,
-                    gender: validatedDoctorData.gender,
-                    dateOfBirth: validatedDoctorData.dateOfBirth,
-                    age: validatedDoctorData.age,
-                    hospitalClinicName: validatedDoctorData.hospitalClinicName
-                };
-
-                // Upload all data to IPFS
-                const ipfsResult = await IPFSService.uploadEncryptedData(allData);
-                console.log("IPFS Result:", ipfsResult);
-
-                // Update doctor with IPFS data
-                const updatedDoctor = await adddoctorModel.findByIdAndUpdate(
-                    doctor._id,
-                    { 
-                        ipfsCID: ipfsResult.cid,
-                        ipfsIV: ipfsResult.iv
-                    },
-                    { new: true }
-                );
-
-                if (!updatedDoctor) {
-                    throw new Error("Failed to create doctor record");
-                }
-
-                console.log("Updated Doctor with IPFS:", updatedDoctor);
-                return updatedDoctor;
-            }
+            // Set doctorId to match _id
+            doctor.doctorId = doctor._id;
+            await doctor.save();
 
             return doctor;
         } catch (error) {
@@ -590,29 +529,86 @@ const addAppointmentToDoctor = async (doctorId, appointmentId) => {
 const getDoctorDashboardData = async (doctorEmail) => {
     try {
         console.log('Looking for doctor with email:', doctorEmail);
-        const doctor = await doctorLogin.findOne({ email: doctorEmail.toLowerCase().trim() });
-        if (!doctor) {
-            throw new Error('Doctor not found');
+        
+        // Get the doctor from adddoctor collection
+        const addDoctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+        if (!addDoctor) {
+            throw new Error('Doctor profile not found');
         }
-        const appointmentQuery = { doctorId: doctor._id };
-        const totalAppointments = await appointmentModel.countDocuments(appointmentQuery);
-        const uniquePatients = await appointmentModel.distinct('patientId', appointmentQuery);
-        const totalPatients = uniquePatients.length;
-        const totalMedicalHistory = await medicalHistoryModel.countDocuments({ doctorId: doctor._id });
 
-        const recentAppointments = await appointmentModel
-            .find(appointmentQuery)
-            .sort({ createdAt: -1 })
-            .limit(2)
+        const currentDoctorId = addDoctor._id.toString();
+        console.log('Looking for appointments for doctorId:', currentDoctorId);
+
+        // Get ALL appointments (we'll filter by doctorId from IPFS data)
+        const allAppointments = await appointmentModel.find({})
             .populate('patientId', 'fullName')
-            .select('patientId appointmentTime status');
+            .sort({ createdAt: -1 });
 
-        // Format recent appointments
-        const formattedAppointments = recentAppointments.map(apt => ({
-            patientName: apt.patientId ? apt.patientId.fullName : 'Unknown Patient',
-            time: apt.appointmentTime,
-            status: apt.status
-        }));
+        console.log(`Found ${allAppointments.length} total appointments in system`);
+
+        // Filter appointments by decrypting IPFS data and checking doctorId
+        const doctorAppointments = [];
+        const recentAppointmentsWithDetails = [];
+        const uniquePatientIds = new Set();
+
+        for (const appointment of allAppointments) {
+            try {
+                if (appointment.ipfsCID && appointment.ipfsIV) {
+                    // Decrypt IPFS data to get doctorId
+                    const ipfsData = await IPFSService.retrieveAndDecrypt(
+                        appointment.ipfsCID,
+                        appointment.ipfsIV
+                    );
+
+                    // Check if this appointment belongs to current doctor
+                    const appointmentDoctorId = ipfsData.doctorId ? ipfsData.doctorId.toString() : null;
+                    
+                    if (appointmentDoctorId === currentDoctorId) {
+                        // This appointment belongs to current doctor
+                        doctorAppointments.push(appointment);
+                        
+                        // Add to unique patients set
+                        if (appointment.patientId) {
+                            uniquePatientIds.add(appointment.patientId._id.toString());
+                        }
+
+                        // Add to recent appointments (limit to 5)
+                        if (recentAppointmentsWithDetails.length < 5) {
+                            recentAppointmentsWithDetails.push({
+                                _id: appointment._id,
+                                patientName: appointment.patientId?.fullName || 'N/A',
+                                appointmentDate: ipfsData.appointmentDate || 'Not Available',
+                                appointmentTime: ipfsData.appointmentTime || 'Not Available',
+                                status: ipfsData.status || 'pending'
+                            });
+                        }
+                    }
+                } else {
+                    console.log(`Appointment ${appointment._id} missing IPFS data`);
+                }
+            } catch (error) {
+                console.error(`Error processing appointment ${appointment._id}:`, error);
+            }
+        }
+
+        const totalAppointments = doctorAppointments.length;
+        const totalPatients = uniquePatientIds.size;
+
+        console.log(`Found ${totalAppointments} appointments for doctor ${currentDoctorId}`);
+        console.log(`Found ${totalPatients} unique patients for doctor`);
+
+        // Get medical history count (if doctorId is also in IPFS for medical history)
+        // For now, let's try direct query first
+        let totalMedicalHistory = 0;
+        try {
+            totalMedicalHistory = await medicalHistoryModel.countDocuments({ 
+                doctorId: currentDoctorId 
+            });
+        } catch (error) {
+            console.log('Error counting medical history:', error);
+            // If direct query fails, we might need to decrypt IPFS data for medical history too
+            totalMedicalHistory = 0;
+        }
 
         return {
             success: true,
@@ -620,11 +616,12 @@ const getDoctorDashboardData = async (doctorEmail) => {
                 totalAppointments,
                 totalPatients,
                 totalMedicalHistory,
-                recentAppointments: formattedAppointments,
+                recentAppointments: recentAppointmentsWithDetails,
                 doctorInfo: {
-                    fullName: doctor.fullName,
-                    specialization: doctor.specialization,
-                    email: doctor.email
+                    fullName: addDoctor.fullName,
+                    specialization: addDoctor.specialization,
+                    email: addDoctor.email,
+                    doctorId: currentDoctorId
                 }
             }
         };

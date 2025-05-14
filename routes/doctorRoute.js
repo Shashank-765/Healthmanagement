@@ -18,6 +18,6 @@ router.delete("/deletedoctors/:email",authenticateToken, doctorController.delete
 router.post('/assign-patient',authenticateToken,doctorController.assignPatientToDoctor);
 router.get('/dashboard/:doctorEmail', authenticateToken,doctorController.getDoctorDashboard);
 router.post('/add-appointment',authenticateToken,doctorController.addAppointmentToDoctor);
-router.get('/readdoctors/:email',authenticateToken,doctorController.readDoctorsByEmail);
+router.get('/readdoctorstransfer/:email',authenticateToken,doctorController.readDoctorsByEmail);
 
 module.exports = router;

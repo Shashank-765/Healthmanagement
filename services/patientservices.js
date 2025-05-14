@@ -556,24 +556,81 @@ const patientService = {
             // Get all appointments for the patient, sorted by most recent
             const appointments = await appointmentModel.find({ patientId })
                 .populate('doctorId', 'fullName specialization email experience availability profileimage')
-                .sort({ appointmentDate: -1, appointmentTime: -1 });
+                .sort({ createdAt: -1 });
+
+            console.log(`Found ${appointments.length} appointments for patient ${patientId}`);
 
             // Total appointments
             const totalAppointments = appointments.length;
 
-            // Get recent appointments with doctor name, date, and time
-            const recentAppointments = appointments.slice(0, 4).map(app => ({
-                doctorName: app.doctorId?.fullName,
-                date: app.appointmentDate,
-                time: app.appointmentTime
-            }));
+            // Get recent appointments with IPFS data
+            const recentAppointments = await Promise.all(
+                appointments.slice(0, 4).map(async (app, index) => {
+                    try {
+                        console.log(`Processing appointment ${index + 1}:`, {
+                            id: app._id,
+                            hasCID: !!app.ipfsCID,
+                            hasIV: !!app.ipfsIV,
+                            cid: app.ipfsCID
+                        });
+
+                        // Check if IPFS data exists
+                        if (!app.ipfsCID || !app.ipfsIV) {
+                            console.log(`Appointment ${app._id} missing IPFS data`);
+                            return {
+                                _id: app._id,
+                                doctorName: app.doctorId?.fullName || 'N/A',
+                                doctorSpecialization: app.doctorId?.specialization || 'N/A',
+                                appointmentDate: 'No IPFS Data',
+                                appointmentTime: 'No IPFS Data',
+                                department: 'N/A',
+                                status: 'pending',
+                                reason: 'Missing IPFS CID/IV'
+                            };
+                        }
+
+                        // Retrieve IPFS data for each appointment
+                        const ipfsData = await IPFSService.retrieveAndDecrypt(
+                            app.ipfsCID,
+                            app.ipfsIV
+                        );
+                        
+                        console.log(`IPFS data for appointment ${app._id}:`, ipfsData);
+                        
+                        return {
+                            _id: app._id,
+                            doctorName: app.doctorId?.fullName || 'N/A',
+                            doctorSpecialization: app.doctorId?.specialization || 'N/A',
+                            appointmentDate: ipfsData.appointmentDate || 'Not Available',
+                            appointmentTime: ipfsData.appointmentTime || 'Not Available',
+                            department: ipfsData.department || 'N/A',
+                            status: ipfsData.status || 'pending',
+                            reason: ipfsData.reason || 'N/A'
+                        };
+                    } catch (error) {
+                        console.error(`Error retrieving IPFS data for appointment ${app._id}:`, error);
+                        return {
+                            _id: app._id,
+                            doctorName: app.doctorId?.fullName || 'N/A',
+                            doctorSpecialization: app.doctorId?.specialization || 'N/A',
+                            appointmentDate: 'Error Loading',
+                            appointmentTime: 'Error Loading',
+                            department: 'N/A',
+                            status: 'pending',
+                            reason: `Error: ${error.message}`
+                        };
+                    }
+                })
+            );
+
+            console.log('Final recent appointments:', recentAppointments);
 
             // Primary doctor (from most recent appointment)
             const primaryDoctor = appointments[0]?.doctorId || null;
 
-            // **Dynamic medical records count**
+            // Dynamic medical records count
             const medicalRecords = await medicalHistoryModel.countDocuments({ patientId });
-
+            
             return {
                 totalAppointments,
                 medicalRecords,

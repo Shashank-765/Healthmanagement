@@ -1,6 +1,10 @@
 const mongoose = require("mongoose");
 
 const adddoctorSchema = new mongoose.Schema({
+    doctorId: {
+        type: mongoose.Schema.Types.ObjectId,
+        index: true
+    },
     fullName: {
         type: String,
         // required: true
@@ -19,10 +23,9 @@ const adddoctorSchema = new mongoose.Schema({
     department: {
         type: String
     },
-        experience:{
+    experience:{
         type:Number,
         // required:true
-
     },
     availability:{
         type:String,
@@ -38,7 +41,7 @@ const adddoctorSchema = new mongoose.Schema({
             message: props => `${props.value} is not a valid 10-digit phone number!`
         }
     },
-        qualification:{
+    qualification:{
         type:String,
         // required:true
     },
@@ -55,11 +58,11 @@ const adddoctorSchema = new mongoose.Schema({
     },
     ipfsCID: {
         type: String,
-        trim: true
+        required:true
     },
     ipfsIV: {
         type: String,
-        trim: true
+        required:true
     },
     email: {
         type: String,
@@ -73,10 +76,8 @@ const adddoctorSchema = new mongoose.Schema({
             },
             message: props => `${props.value} is not a valid email!`
         },
-        index: true  // Add index for better query performance
+        index: true
     },
-    // ... other existing fields ...
-
     patients: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'AddPatient'
@@ -91,7 +92,15 @@ const adddoctorSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Add a pre-save hook to ensure email is always lowercase
+// Add pre-save middleware to ensure doctorId is set
+adddoctorSchema.pre('save', function(next) {
+    if (!this.doctorId) {
+        this.doctorId = this._id;
+    }
+    next();
+});
+
+// Add pre-save hook to ensure email is always lowercase
 adddoctorSchema.pre('save', function(next) {
     this.email = this.email.toLowerCase();
     next();

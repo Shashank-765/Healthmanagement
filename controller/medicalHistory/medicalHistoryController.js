@@ -31,7 +31,7 @@ const medicalHistoryController = {
             // Get token
             const token = req.headers.authorization?.split(' ')[1];
             if (!token) {
-                console.log("❌ No token provided");
+                console.log(" No token provided");
                 return res.status(401).json({
                     success: false,
                     message: "No token provided"
@@ -49,7 +49,7 @@ const medicalHistoryController = {
             });
 
             if (!doctor) {
-                console.log("❌ Doctor not found");
+                console.log(" Doctor not found");
                 return res.status(400).json({
                     success: false,
                     message: "Doctor not found with the provided email."
@@ -58,13 +58,11 @@ const medicalHistoryController = {
             console.log("✅ Doctor found:", { id: doctor._id, name: doctor.fullName });
 
             // Find patient
-            console.log("5. Finding patient with email:", patientEmail);
             const patient = await AddPatient.findOne({ 
                 email: patientEmail.toLowerCase()
             });
 
             if (!patient) {
-                console.log("❌ Patient not found");
                 return res.status(400).json({
                     success: false,
                     message: "Patient not found with the provided email."
@@ -89,7 +87,7 @@ const medicalHistoryController = {
             });
 
             if (!appointment) {
-                console.log("❌ No valid appointment found");
+                console.log(" No valid appointment found");
                 return res.status(400).json({
                     success: false,
                     message: "No valid appointment found between you and this patient."
@@ -103,31 +101,23 @@ const medicalHistoryController = {
                 doctorId: doctor._id,
                 condition,
                 notes,
-                date: date || new Date(),
-                timestamp: new Date().getTime()
+                date: date || new Date()
             };
 
-            // 8. Upload sensitive data to IPFS
-            console.log("7. Uploading sensitive data to IPFS");
+            // Upload to IPFS
             const { cid, iv } = await IPFSService.uploadEncryptedData(sensitiveData);
-            console.log("✅ IPFS upload successful:", { cid, iv });
 
-            // 9. Create medical history record with only necessary data
-            console.log("8. Creating medical history record");
+            // Create medical history record
             const medicalHistory = new medicalHistoryModel({
                 patientId: patient._id,
                 doctorId: doctor._id,
+                doctorName: doctor.fullName,
                 ipfsCID: cid,
                 ipfsIV: iv,
                 version: 1,
-                hl: {
-                    previousCID: null,
-                    previousIV: null,
-                    date: new Date()
-                }
+                date: date || new Date()
             });
 
-            // 10. Save to database
             const savedHistory = await medicalHistory.save();
             console.log("✅ Medical history saved:", savedHistory._id);
 
@@ -138,6 +128,9 @@ const medicalHistoryController = {
                 doctorId: savedHistory.doctorId,
                 patientName: patient.fullName,
                 doctorName: doctor.fullName,
+                condition,
+                notes,
+                date: savedHistory.date,
                 ipfsCID: savedHistory.ipfsCID,
                 ipfsIV: savedHistory.ipfsIV,
                 version: savedHistory.version,
@@ -152,7 +145,7 @@ const medicalHistoryController = {
             });
 
         } catch (error) {
-            console.error("❌ Error in createMedicalHistory:", error);
+            console.error(" Error in createMedicalHistory:", error);
             console.error("Error stack:", error.stack);
             
             if (error.name === 'JsonWebTokenError') {
@@ -215,10 +208,7 @@ const medicalHistoryController = {
 
     getPatientMedicalHistory: async (req, res) => {
         try {
-            const userEmail = req.user.email; 
-
-            // Find patient by email
-            const patient = await AddPatient.findOne({ email: userEmail });
+          const patient = await AddPatient.findOne({ email: req.user.email });
             if (!patient) {
                 return res.status(404).json({
                     success: false,
@@ -227,12 +217,36 @@ const medicalHistoryController = {
             }
 
             // Get medical history for this patient
-            const history = await medicalHistoryService.getPatientMedicalHistory(patient._id);
+            const histories = await medicalHistoryModel.find({ patientId: patient._id })
+                .populate('doctorId', 'fullName');
+
+            const historiesWithDetails = await Promise.all(histories.map(async (record) => {
+                let ipfsData = {};
+                try {
+                    if (record.ipfsCID && record.ipfsIV) {
+                        ipfsData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
+                    }
+                } catch (e) {
+                    ipfsData = { error: 'Failed to decrypt IPFS data' };
+                }
+                console.log('IPFS data:', ipfsData);
+                console.log(ipfsData.notes);
+                console.log(record.notes);
+                return {
+                    _id: record._id,
+                    doctorName: record.doctorId?.fullName || record.doctorName || 'N/A',
+                    condition: ipfsData.condition || 'N/A',
+                    notes: ipfsData.notes || record.notes || 'N/A',
+                    date: record.date,
+                    createdAt: record.createdAt,
+                    updatedAt: record.updatedAt
+                };
+            }));
 
             res.status(200).json({
                 success: true,
                 message: "Patient medical history fetched successfully",
-                data: history.data
+                data: historiesWithDetails
             });
         } catch (error) {
             console.log("Error fetching patient's medical history:", error.message);
@@ -258,7 +272,7 @@ const medicalHistoryController = {
 
             // Validate request body
             if (!historyId || !condition || !notes) {
-                console.log('❌ Missing required fields');
+                console.log(' Missing required fields');
                 return res.status(400).json({
                     success: false,
                     message: "History ID, condition and notes are required"
@@ -267,7 +281,7 @@ const medicalHistoryController = {
 
             // Validate historyId format
             if (!mongoose.Types.ObjectId.isValid(historyId)) {
-                console.log('❌ Invalid history ID format');
+                console.log(' Invalid history ID format');
                 return res.status(400).json({
                     success: false,
                     message: "Invalid history ID format"
@@ -281,13 +295,13 @@ const medicalHistoryController = {
             });
 
             if (!doctor) {
-                console.log('❌ Doctor not found');
+                console.log(' Doctor not found');
                 return res.status(404).json({
                     success: false,
                     message: "Doctor not found"
                 });
             }
-            console.log('✅ Doctor found:', doctor._id);
+            console.log('Doctor found:', doctor._id);
 
             // 2. Find the medical history record
             console.log('3. Finding medical history record');
@@ -297,25 +311,25 @@ const medicalHistoryController = {
             });
 
             if (!record) {
-                console.log('❌ Medical history not found');
+                console.log(' Medical history not found');
                 return res.status(404).json({
                     success: false,
                     message: "Medical history not found or you don't have permission to edit it"
                 });
             }
-            console.log('✅ Medical history found:', record._id);
+            console.log('Medical history found:', record._id);
 
             // 3. Get patient details
             console.log('4. Finding patient');
             const patient = await AddPatient.findById(record.patientId);
             if (!patient) {
-                console.log('❌ Patient not found');
+                console.log(' Patient not found');
                 return res.status(404).json({
                     success: false,
                     message: "Patient not found"
                 });
             }
-            console.log('✅ Patient found:', patient._id);
+            console.log('Patient found:', patient._id);
 
             // 4. Prepare update data
             console.log('5. Preparing update data');
@@ -328,7 +342,7 @@ const medicalHistoryController = {
             // 5. Call service to update medical history
             console.log('6. Calling service to update');
             const updatedHistory = await medicalHistoryService.editMedicalHistory(record._id, updateData);
-            console.log('✅ Service update successful');
+            console.log(' Service update successful');
 
             // 6. Send response
             console.log('7. Sending response');
@@ -343,7 +357,7 @@ const medicalHistoryController = {
             });
             console.log('=== Medical History Edit Controller Complete ===\n');
         } catch (error) {
-            console.error('❌ Error in editMedicalHistory controller:', error);
+            console.error(' Error in editMedicalHistory controller:', error);
             
             // Handle specific error types
             if (error.name === 'ValidationError') {
@@ -368,12 +382,12 @@ const medicalHistoryController = {
     },
     getMedicalHistoryByDoctor: async (req, res) => {
         try {
-            console.log('\n=== Starting getMedicalHistoryByDoctor Controller ===');
+          
             const email = req.params.email;
-            console.log('1. Doctor email:', email);
+          
 
             if (!email) {
-                console.log('❌ No email provided');
+                console.log(' No email provided');
                 return res.status(400).json({
                     success: false,
                     message: "Email is required"
@@ -381,13 +395,13 @@ const medicalHistoryController = {
             }
 
             // Find doctor using email
-            console.log('2. Finding doctor by email');
+     
             const doctor = await adddoctorModel.findOne({ 
                 email: email.toLowerCase()
             });
 
             if (!doctor) {
-                console.log('❌ Doctor not found');
+                console.log(' Doctor not found');
                 return res.status(404).json({
                     success: false,
                     message: "Doctor not found"
@@ -395,12 +409,12 @@ const medicalHistoryController = {
             }
 
             // Get all medical history records for this doctor
-            console.log('3. Fetching medical history records');
+       
             const result = await medicalHistoryService.getMedicalHistoryByDoctor(doctor._id);
             console.log('4. Records fetched:', result.data?.length || 0);
 
             if (!result.success) {
-                console.log('❌ Service returned error');
+                console.log(' Service returned error');
                 return res.status(500).json(result);
             }
 
@@ -413,16 +427,16 @@ const medicalHistoryController = {
                 const patientName = record.patientName;
                 const doctorName = record.doctorName;
                 
-                console.log('Processing record:', { 
-                    patientId, 
-                    patientName, 
-                    doctorName,
-                    record: {
-                        patientId: record.patientId,
-                        patientName: record.patientName,
-                        doctorName: record.doctorName
-                    }
-                });
+                // console.log('Processing record:', { 
+                //     patientId, 
+                //     patientName, 
+                //     doctorName,
+                //     record: {
+                //         patientId: record.patientId,
+                //         patientName: record.patientName,
+                //         doctorName: record.doctorName
+                //     }
+                // });
                 
                 if (!groupedRecords[patientId]) {
                     groupedRecords[patientId] = {
@@ -447,7 +461,7 @@ const medicalHistoryController = {
             }
 
             // Sort history chains by version
-            console.log('6. Sorting history chains');
+     
             const formattedRecords = Object.values(groupedRecords).map(group => ({
                 ...group,
                 historyChain: group.historyChain.sort((a, b) => b.version - a.version)
@@ -470,14 +484,70 @@ const medicalHistoryController = {
     createPatientSelfHistory: async (req, res) => {
         try {
             const { fullName, doctorName, condition, notes, date } = req.body;
+    
+            // Validate required fields
+            if (!fullName || !condition || !notes) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Full name, condition, and notes are required"
+                });
+            }
+    
+            // Call the service function
             const result = await medicalHistoryService.createPatientSelfHistory({
-                 fullName, doctorName, condition, notes, date
+                fullName,
+                doctorName: doctorName || 'Self',
+                condition,
+                notes,
+                date
             });
+    
             res.status(201).json(result);
         } catch (error) {
-            res.status(500).json({ success: false, message: error.message || 'Failed to create medical history' });
+            console.error("Error in createPatientSelfHistory:", error);
+            res.status(500).json({
+                success: false,
+                message: error.message || "Failed to create medical history"
+            });
         }
-    }
+    }, 
+    getIPFSDataByCID: async (req, res) => {
+        try {
+            const { cid, iv } = req.query;
+
+            if (!cid || !iv) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Both CID and IV are required"
+                });
+            }
+
+            console.log('Retrieving IPFS data with:', { cid, iv });
+
+            // Get data from IPFS using the service with both CID and IV
+            const ipfsData = await IPFSService.retrieveAndDecrypt(cid, iv);
+
+            if (!ipfsData) {
+                return res.status(404).json({
+                    success: false,
+                    message: "No data found for the provided CID and IV"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "IPFS data retrieved successfully",
+                data: ipfsData
+            });
+
+        } catch (error) {
+            console.error('Error in getIPFSDataByCID:', error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Error retrieving IPFS data"
+            });
+        }
+    } 
 };
 
 

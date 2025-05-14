@@ -53,16 +53,18 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// Handle preflight requests
-// app.options('*', cors(corsOptions)); //error
-
-// Cookie parser middleware
 app.use(cookieParser());
-
-// Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Increase timeout for all routes
+app.use((req, res, next) => {
+    res.setTimeout(60000, () => {
+        console.log('Request has timed out.');
+        res.status(504).send('Request has timed out.');
+    });
+    next();
+});
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -71,16 +73,51 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 if (!fs.existsSync('uploads')) {
     fs.mkdirSync('uploads');
 }
-    app.use('/api/v1/doctor', doctorRoute);
-    app.use('/api/v1/admin', adminRoute);
+
+// Routes
+app.use('/api/v1/doctor', doctorRoute);
+app.use('/api/v1/admin', adminRoute);
 app.use('/api/v1/appointment', appointmentRoute);
 app.use('/api/v1/patient', patientRoute);
 app.use('/api/v1/medical-history', medicalHistoryRoutes);
 app.use('/api/v1/insurance', insuranceRoute);
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({
+        success: false,
+        message: 'Something went wrong!',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Promise Rejection:', err);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+});
+
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    connectDB();
-    console.log(`server is running on the port of ${PORT}`);
-});
+// Start server
+const startServer = async () => {
+    try {
+        // Connect to database
+        await connectDB();
+        
+        // Start listening
+        app.listen(PORT, () => {
+            console.log(`Server is running on port ${PORT}`);
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+};
+
+startServer();

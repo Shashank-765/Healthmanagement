@@ -4,29 +4,21 @@ const medicalHistorySchema = new mongoose.Schema({
     patientId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'AddPatient',
-        required: true,
-        validate: {
-            validator: function(v) {
-                return mongoose.Types.ObjectId.isValid(v);
-            },
-            message: props => `${props.value} is not a valid patient ID!`
-        }
+        required: true
     },
     doctorId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'adddoctor',
-        required: true,
-        validate: {
-            validator: function(v) {
-                return mongoose.Types.ObjectId.isValid(v);
-            },
-            message: props => `${props.value} is not a valid doctor ID!`
-        }
+        required: true
+    },
+    doctorName: {
+        type: String,
+        // required: true
     },
     uuid: {
         type: String,
         unique: true,
-        sparse: true,  // This allows null/undefined values
+        sparse: true,
         index: true
     },
     date: {
@@ -35,23 +27,19 @@ const medicalHistorySchema = new mongoose.Schema({
     },
     condition: {
         type: String,
-        trim: true,
-        // required: [true, 'Condition is required']
+        trim: true
     },
     notes: {
         type: String,
-        trim: true,
-        // required: [true, 'Notes are required']
+        trim: true
     },
     ipfsCID: {
         type: String,
-        required: true,
-        trim: true
+        required: true
     },
     ipfsIV: {
         type: String,
-        required: true,
-        trim: true
+        required: true
     },
     department: {
         type: String,
@@ -85,7 +73,7 @@ const medicalHistorySchema = new mongoose.Schema({
 
 // Add indexes for better query performance
 medicalHistorySchema.index({ patientId: 1, createdAt: -1 });
-medicalHistorySchema.index({ doctorId: 1, createdAt: -1 });
+// medicalHistorySchema.index({ doctorId: 1, createdAt: -1 });
 medicalHistorySchema.index({ patientId: 1, version: -1 });
 
 // Add a pre-save middleware to generate UUID if not present
@@ -105,7 +93,7 @@ medicalHistorySchema.pre('find', function() {
 
 // Add a method to validate the record
 medicalHistorySchema.methods.validateRecord = function() {
-    if (!this.patientId || !this.doctorId || !this.ipfsCID || !this.ipfsIV) {
+    if (!this.patientId || !this.ipfsCID || !this.ipfsIV) {
         throw new Error('Invalid medical history record: Missing required fields');
     }
     return true;

@@ -5,6 +5,8 @@ const doctorLogin = require('../../models/doctor/loginModel');
 const adddoctorModel = require('../../models/doctor/adddoctorModel');
 const appointmentModel = require('../../models/appointment/appointmentModel');
 const { doctorSignupService, doctorLoginService, createdDoctor, doctorManagementService, getDoctorDashboardData } = require('../../services/doctorservice');
+const encryptionService = require('../../utils/encryptdecrypt');
+const IPFSService = require('../../services/ipfsService');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 
@@ -218,25 +220,33 @@ module.exports = {
             const skip = (page - 1) * limit;
 
             console.log('Received filters:', filters);
+            console.log('Pagination params:', { page, limit, skip });
+
+            // Build query
+            let query = {};
+            if (filters.specialization) {
+                query.specialization = { $regex: new RegExp(filters.specialization, 'i') };
+            }
+            if (filters.fullName) {
+                query.fullName = { $regex: new RegExp(filters.fullName, 'i') };
+            }
 
             // Count total matching docs
-            const totalCount = await adddoctorModel.countDocuments({
-                ...(filters.specialization ? { specialization: { $regex: new RegExp(filters.specialization, 'i') } } : {}),
-                ...(filters.fullName ? { fullName: { $regex: new RegExp(filters.fullName, 'i') } } : {})
-            });
+            const totalCount = await adddoctorModel.countDocuments(query);
+            console.log('Total count of matching doctors:', totalCount);
 
-            // Fetch paginated docs
-            const doctors = await adddoctorModel.find({
-                ...(filters.specialization ? { specialization: { $regex: new RegExp(filters.specialization, 'i') } } : {}),
-                ...(filters.fullName ? { fullName: { $regex: new RegExp(filters.fullName, 'i') } } : {})
-            })
-                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio')
+            // Fetch all doctor data including IPFS references
+            const doctors = await adddoctorModel.find(query)
+                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio ipfsCID ipfsIV')
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .lean();
 
+            console.log('Raw doctors data from DB:', doctors);
+
             if (doctors.length === 0) {
+                console.log('No doctors found with the given filters');
                 return res.status(200).json({
                     success: true,
                     message: "No doctors found with the given filters",
@@ -247,11 +257,91 @@ module.exports = {
                 });
             }
 
+            // Process each doctor and get missing data from IPFS if needed
+            const processedDoctors = await Promise.all(doctors.map(async (doctor) => {
+                try {
+                    // Check if important fields are missing
+                    const needsIPFSData = !doctor.specialization || !doctor.contactnumber || doctor.experience === undefined;
+                    
+                    if (needsIPFSData && doctor.ipfsCID && doctor.ipfsIV) {
+                        console.log(`Retrieving IPFS data for doctor: ${doctor.fullName}`);
+                        
+                        try {
+                            const ipfsData = await IPFSService.retrieveAndDecrypt(
+                                doctor.ipfsCID,
+                                doctor.ipfsIV
+                            );
+                            
+                            // Merge IPFS data with existing data
+                            return {
+                                _id: doctor._id,
+                                fullName: doctor.fullName,
+                                email: doctor.email,
+                                specialization: doctor.specialization || ipfsData.specialization || 'Not Available',
+                                experience: doctor.experience !== undefined ? doctor.experience : (ipfsData.yearsOfExperience || 0),
+                                availability: doctor.availability || 'Available',
+                                contactnumber: doctor.contactnumber || ipfsData.contactNumber || 'Not Available',
+                                qualification: doctor.qualification || ipfsData.qualification || 'MBBS',
+                                address: doctor.address || ipfsData.address || 'Not provided',
+                                bio: doctor.bio || ipfsData.bio || '',
+                                profileimage: doctor.profileimage || ipfsData.profileimage || ''
+                            };
+                        } catch (ipfsError) {
+                            console.error(`Error retrieving IPFS data for doctor ${doctor._id}:`, ipfsError);
+                            // Return with default values if IPFS fails
+                            return {
+                                _id: doctor._id,
+                                fullName: doctor.fullName,
+                                email: doctor.email,
+                                specialization: doctor.specialization || 'Not Available',
+                                experience: doctor.experience !== undefined ? doctor.experience : 0,
+                                availability: doctor.availability || 'Available',
+                                contactnumber: doctor.contactnumber || 'Not Available',
+                                qualification: doctor.qualification || 'MBBS',
+                                address: doctor.address || 'Not provided',
+                                bio: doctor.bio || '',
+                                profileimage: doctor.profileimage || ''
+                            };
+                        }
+                    } else {
+                        // Doctor has all required data in MongoDB
+                        return {
+                            _id: doctor._id,
+                            fullName: doctor.fullName,
+                            email: doctor.email,
+                            specialization: doctor.specialization || 'Not Available',
+                            experience: doctor.experience !== undefined ? doctor.experience : 0,
+                            availability: doctor.availability || 'Available',
+                            contactnumber: doctor.contactnumber || 'Not Available',
+                            qualification: doctor.qualification || 'MBBS',
+                            address: doctor.address || 'Not provided',
+                            bio: doctor.bio || '',
+                            profileimage: doctor.profileimage || ''
+                        };
+                    }
+                } catch (error) {
+                    console.error(`Error processing doctor ${doctor._id}:`, error);
+                    return {
+                        _id: doctor._id,
+                        fullName: doctor.fullName,
+                        email: doctor.email,
+                        specialization: 'Error Loading',
+                        experience: 0,
+                        availability: 'Available',
+                        contactnumber: 'Error Loading',
+                        qualification: 'Error Loading',
+                        address: 'Error Loading',
+                        bio: 'Error Loading',
+                        profileimage: ''
+                    };
+                }
+            }));
+
             return res.status(200).json({
                 success: true,
                 message: "Doctors fetched successfully",
-                count: doctors.length,
-                data: doctors,
+                count: processedDoctors.length,
+                data: processedDoctors,
                 totalCount,
                 totalPages: Math.ceil(totalCount / limit),
                 page
@@ -435,26 +525,73 @@ module.exports = {
 
     readDoctorsByEmail: async (req, res) => {
         try {
-            const { email } = req.params;
+          const { email } = req.params;
 
             // First check in signup collection
             const signupDoctor = await doctorSignup.findOne({ email });
-            
-            // Then check in adddoctor collection
-            const addDoctor = await adddoctorModel.findOne({ email });
+            const existingAddDoctor = await adddoctorModel.findOne({ email });
 
-            if (!signupDoctor && !addDoctor) {
+            if (!signupDoctor) {
                 return res.status(404).json({
                     success: false,
-                    message: "Doctor not found in any collection"
+                    message: "Doctor not found in signup collection"
                 });
             }
 
-            // Return the doctor data
+            // If doctor already exists in adddoctorModel, return existing data
+            if (existingAddDoctor) {
+                return res.status(200).json({
+                    success: true,
+                    message: "Doctor already exists in adddoctor collection",
+                    data: existingAddDoctor
+                });
+            }
+
+            // Get sensitive data from IPFS
+            let sensitiveData = {};
+            if (signupDoctor.ipfsCID && signupDoctor.ipfsIV) {
+                try {
+                    sensitiveData = await IPFSService.retrieveAndDecrypt(
+                        signupDoctor.ipfsCID,
+                        signupDoctor.ipfsIV
+                    );
+                    console.log('Retrieved IPFS data:', sensitiveData); // Debug log
+                } catch (error) {
+                    console.error('Error retrieving IPFS data:', error);
+                }
+            }
+
+            // Create new doctor document with data from both signup and IPFS
+            const newDoctor = {
+                UUID: signupDoctor._id,
+                doctorId: signupDoctor._id,
+                fullName: signupDoctor.fullName,
+                email: signupDoctor.email,
+                // Extract these important fields from IPFS data and store in main document
+                specialization: sensitiveData.specialization || "NA",
+                experience: sensitiveData.yearsOfExperience || 0,
+                contactnumber: sensitiveData.contactNumber || "",
+                // Set default values for other required fields
+                availability: "Available",
+                qualification: sensitiveData.qualification || "MBBS",
+                address: sensitiveData.address || "Not provided",
+                bio: "",
+                profileimage: "",
+                ipfsCID: signupDoctor.ipfsCID,
+                ipfsIV: signupDoctor.ipfsIV,
+                patients: [],
+                appointments: []
+            };
+
+            // Save to adddoctorModel
+            const savedDoctor = await adddoctorModel.create(newDoctor);
+
             return res.status(200).json({
                 success: true,
-                data: signupDoctor || addDoctor
+                message: "Doctor data transferred successfully",
+                data: savedDoctor
             });
+
         } catch (error) {
             console.error('Error in readDoctorsByEmail:', error);
             return res.status(500).json({
@@ -464,10 +601,5 @@ module.exports = {
         }
     }
 };
-
-
-// add :- fullname,specialization,experience,avaiability,contactnumber,email,password,qualification,address,bio,profileimage
-// read on :- what to show, profileimage, fullname, specialization, experience, avaiability, contactnumber, email
-//schedule appointment:- profileimage, fullname(doctor), specialization, prefered date and perfered time, full name (patient),phonenumber(patient),email address and reason for visit both patient.
-//doctor view profile:- profileimage, fullname,specalization,experience,avaiability,contactnumber,email,rating,patientsin numbers. and about(bio).
+//profileimage, fullname,specalization,experience,avaiability,contactnumber,email,rating,patientsin numbers. and about(bio).
 

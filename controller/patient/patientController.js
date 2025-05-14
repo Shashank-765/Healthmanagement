@@ -460,8 +460,10 @@ module.exports = {
                 patientId: signupPatient._id, // Use signup _id as patientId
                 fullName: signupPatient.fullName,
                 email: signupPatient.email,
-                ipfsCID: ipfsCID, // Use original IPFS CID if it exists
-                ipfsIV: ipfsIV, // Use original IV if it exists
+                contactNumber: signupPatient.contactNumber,
+                specialization: signupPatient.specialization,
+                ipfsCID: ipfsCID,
+                ipfsIV: ipfsIV,
                 sensitiveData: {
                     encryptedData: encrypted.encryptedData,
                     iv: encrypted.iv

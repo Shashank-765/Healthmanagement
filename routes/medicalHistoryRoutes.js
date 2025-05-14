@@ -4,7 +4,7 @@ const { authenticateToken } = require('../middleware/middleware');
 const medicalHistoryController = require('../controller/medicalHistory/medicalHistoryController');
 
 // Test route for IPFS data - No authentication
-// router.get('/test-ipfs', medicalHistoryController.getIPFSDataByCID);
+router.get('/test-ipfs', medicalHistoryController.getIPFSDataByCID);
 
 // Protected routes with authentication
 router.post("/medical-create", authenticateToken, medicalHistoryController.createMedicalHistory);
