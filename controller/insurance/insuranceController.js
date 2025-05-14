@@ -135,6 +135,7 @@ module.exports = {
         try {
             // Get all medical history records with proper error handling
             const totalMedicalHistory = await MedicalHistory.countDocuments();
+            console.log(totalMedicalHistory);
             const totalInsurancePatients = await InsurancePatient.countDocuments({ hasAccess: true });
             const medicalHistories = await MedicalHistory.find({})
                 .populate({

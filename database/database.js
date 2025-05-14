@@ -9,7 +9,7 @@ const connectDB = async () => {
         }
 
         console.log('Attempting to connect to MongoDB...');
-        console.log('MongoDB URI:', process.env.MONGODB_URI);
+        // console.log('MongoDB URI:', process.env.MONGODB_URI);
 
         const conn = await mongoose.connect(process.env.MONGODB_URI, {
             useNewUrlParser: true,
@@ -22,7 +22,7 @@ const connectDB = async () => {
             w: 'majority'
         });
 
-        console.log(`MongoDB Connected: ${conn.connection.host}`);
+        // console.log(`MongoDB Connected: ${conn.connection.host}`);
 
         // Handle connection events
         mongoose.connection.on('error', err => {

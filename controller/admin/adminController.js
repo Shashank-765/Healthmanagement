@@ -640,31 +640,108 @@ module.exports = {
             const medicalHistories = await MedicalHistory.find({})
                 .populate({
                     path: 'patientId',
-                    select: 'fullName email contactnumber',
+                    select: 'fullName email contactnumber ipfsCID ipfsIV',
                     model: 'AddPatient'
                 });
+
+            console.log('\n========= ADMIN - GET ALL PATIENTS START =========');
+            console.log('Total medical history records found:', medicalHistories.length);
 
             // Create a map to store unique patients
             const patientsMap = new Map();
 
             // Process each medical history record
-            medicalHistories.forEach(history => {
+            for (const history of medicalHistories) {
                 if (history.patientId) {
                     const patientId = history.patientId._id.toString();
+                    
+                    // Initialize patient data if not exists
                     if (!patientsMap.has(patientId)) {
+                        let contactNumber = 'Not Available';
+                        
+                        // Try to get contact number from MongoDB first
+                        if (history.patientId.contactnumber) {
+                            contactNumber = history.patientId.contactnumber;
+                        } 
+                        // If not available in MongoDB, get from IPFS
+                        else if (history.patientId.ipfsCID && history.patientId.ipfsIV) {
+                            try {
+                                const ipfsData = await IPFSService.retrieveAndDecrypt(
+                                    history.patientId.ipfsCID,
+                                    history.patientId.ipfsIV
+                                );
+                                
+                                // Get contact number from IPFS
+                                contactNumber = ipfsData.contactNumber || 
+                                             ipfsData.phoneNumber || 
+                                             ipfsData.contactnumber || 
+                                             'Not Available';
+                            } catch (error) {
+                                console.error(`Error retrieving IPFS data for patient ${patientId}:`, error);
+                                contactNumber = 'Error Loading';
+                            }
+                        }
+
                         patientsMap.set(patientId, {
                             _id: history.patientId._id,
                             name: history.patientId.fullName,
                             email: history.patientId.email,
-                            phone: history.patientId.contactnumber
+                            phone: contactNumber,
+                            medicalHistory: [] // Add medical history array
                         });
                     }
+
+                    // Now fetch notes and condition from medical history IPFS
+                    const patient = patientsMap.get(patientId);
+                    let condition = 'No condition specified';
+                    let notes = 'No notes available';
+
+                    // Try to get condition and notes from medical history IPFS
+                    if (history.ipfsCID && history.ipfsIV) {
+                        console.log(`\nFetching medical history IPFS for patient: ${patient.name}`);
+                        console.log('Medical History CID:', history.ipfsCID);
+                        
+                        try {
+                            const medicalIPFSData = await IPFSService.retrieveAndDecrypt(
+                                history.ipfsCID,
+                                history.ipfsIV
+                            );
+                            
+                            console.log('Medical IPFS Data:', JSON.stringify(medicalIPFSData, null, 2));
+                            condition = medicalIPFSData.condition || 'No condition in IPFS';
+                            notes = medicalIPFSData.notes || 'No notes in IPFS';
+                            
+                            console.log('Retrieved - Condition:', condition);
+                            console.log('Retrieved - Notes:', notes);
+                            
+                        } catch (error) {
+                            console.error(`Error retrieving medical IPFS data for ${history._id}:`, error);
+                            condition = history.condition || 'IPFS error - no MongoDB condition';
+                            notes = history.notes || 'IPFS error - no MongoDB notes';
+                        }
+                    } else {
+                        console.log(`No medical IPFS data for ${history._id}`);
+                        condition = history.condition || 'No condition specified';
+                        notes = history.notes || 'No notes available';
+                    }
+
+                    // Add medical history to patient
+                    patient.medicalHistory.push({
+                        _id: history._id,
+                        condition: condition,
+                        notes: notes,
+                        date: history.date || new Date(),
+                        doctorName: history.doctorName || 'Unknown Doctor'
+                    });
                 }
-            });
+            }
 
             // Convert map to array and sort by name
             const formattedPatients = Array.from(patientsMap.values())
                 .sort((a, b) => a.name.localeCompare(b.name));
+
+            console.log('Total unique patients found:', formattedPatients.length);
+            console.log('========= ADMIN - GET ALL PATIENTS END =========\n');
 
             res.status(200).json({
                 success: true,
@@ -686,14 +763,19 @@ module.exports = {
         try {
             const { patientName } = req.params;
 
+            console.log('\n========= ADMIN - GET PATIENT MEDICAL HISTORY START =========');
+            console.log('Patient Name:', patientName);
+
             // Find patient by name
             const patient = await AddPatient.findOne({ fullName: patientName });
             if (!patient) {
+                console.log(' Patient not found');
                 return res.status(404).json({
                     success: false,
                     message: "Patient not found"
                 });
             }
+            console.log(' Patient found:', patient._id);
 
             // Get medical history with doctor details
             const medicalHistory = await MedicalHistory.find({ patientId: patient._id })
@@ -704,13 +786,95 @@ module.exports = {
                 })
                 .sort({ date: -1 });
 
-            // Format the response with null checks
-            const formattedHistory = medicalHistory.map(record => ({
+            console.log('Total medical history records found:', medicalHistory.length);
+
+            if (!medicalHistory || medicalHistory.length === 0) {
+                console.log('ℹNo medical history found for this patient');
+                return res.status(200).json({
+                    success: true,
+                    message: "No medical history found for this patient",
+                    data: { patientName: patient.fullName, medicalHistory: [] }
+                });
+            }
+
+            // Process each medical history record to get IPFS data
+            const formattedHistory = await Promise.all(medicalHistory.map(async (record, index) => {
+                console.log(`\n------- Processing Record ${index + 1} -------`);
+                console.log('Record ID:', record._id);
+                console.log('Doctor:', record.doctorId?.fullName || 'Unknown');
+                console.log('Date:', record.date);
+                console.log('Has IPFS CID:', !!record.ipfsCID);
+                console.log('Has IPFS IV:', !!record.ipfsIV);
+
+                let condition = 'No condition specified';
+                let notes = 'No notes available';
+
+                // Try to get condition and notes from IPFS
+                if (record.ipfsCID && record.ipfsIV) {
+                    console.log(' IPFS CID:', record.ipfsCID);
+                    console.log('IPFS IV:', record.ipfsIV);
+                    console.log(' Fetching from IPFS...');
+                    
+                    try {
+                        const ipfsData = await IPFSService.retrieveAndDecrypt(
+                            record.ipfsCID,
+                            record.ipfsIV
+                        );
+                        
+                        console.log('✅ IPFS retrieval SUCCESS!');
+                        console.log('📦 Raw IPFS Data:', JSON.stringify(ipfsData, null, 2));
+                        console.log('🩺 Condition from IPFS:', ipfsData.condition);
+                        console.log('📄 Notes from IPFS:', ipfsData.notes);
+                        
+                        condition = ipfsData.condition || 'No condition in IPFS';
+                        notes = ipfsData.notes || 'No notes in IPFS';
+                        
+                        console.log('🎯 FINAL ASSIGNED VALUES:');
+                        console.log('📝 Final Condition:', condition);
+                        console.log('📑 Final Notes:', notes);
+                        
+                    } catch (ipfsError) {
+                        console.error('❌ IPFS Error for record', record._id, ':', ipfsError.message);
+                        // Fallback to MongoDB data if available
+                        condition = record.condition || 'IPFS error - no MongoDB condition';
+                        notes = record.notes || 'IPFS error - no MongoDB notes';
+                        
+                        console.log('🔄 Fallback to MongoDB:');
+                        console.log('📝 MongoDB Condition:', record.condition || 'Not available');
+                        console.log('📑 MongoDB Notes:', record.notes || 'Not available');
+                    }
+                } else {
+                    console.log('ℹ️ No IPFS data available for this record');
+                    console.log('📝 MongoDB Condition:', record.condition || 'Not available');
+                    console.log('📑 MongoDB Notes:', record.notes || 'Not available');
+                    
+                    // Use MongoDB data if available
+                    condition = record.condition || 'No condition specified';
+                    notes = record.notes || 'No notes available';
+                }
+
+                const formattedRecord = {
+                    _id: record._id,
                 doctorName: record.doctorId?.fullName || 'Unknown Doctor',
-                condition: record.condition || 'No condition specified',
-                notes: record.notes || 'No notes available',
-                date: record.date || new Date()
+                    condition: condition,
+                    notes: notes,
+                    date: record.date || new Date(),
+                    createdAt: record.createdAt,
+                    updatedAt: record.updatedAt
+                };
+
+                console.log('📤 Formatted Record for Response:');
+                console.log('🩺 Response Condition:', formattedRecord.condition);
+                console.log('📄 Response Notes:', formattedRecord.notes);
+                console.log('------- End Record', index + 1, '-------');
+
+                return formattedRecord;
             }));
+
+            console.log('\n========= API RESPONSE SUMMARY =========');
+            console.log('📊 Total records processed:', formattedHistory.length);
+            console.log('📤 Sending response...');
+            console.log('========= ADMIN - GET PATIENT MEDICAL HISTORY END =========\n');
 
             res.status(200).json({
                 success: true,
@@ -721,7 +885,7 @@ module.exports = {
                 }
             });
         } catch (error) {
-            // console.error('Error fetching patient medical history:', error);
+            console.error('💥 Error fetching patient medical history:', error);
             res.status(500).json({
                 success: false,
                 message: "Error fetching patient medical history",
