@@ -15,7 +15,7 @@ const doctorLoginSchema = new Schema({
         type: String,
         required: true
     }
-}, { timestamps: true });
+}, { timestamps: true },{ versionKey: false });
 
 const DoctorLogin = mongoose.model('DoctorLogin', doctorLoginSchema);
 

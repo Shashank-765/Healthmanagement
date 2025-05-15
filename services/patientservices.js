@@ -128,60 +128,31 @@ const patientSignupService = {
 
 const patientLoginService = {
     validateLogin: async (email, password) => {
-        try {
-            console.log("1. Starting login validation...");
-            console.log("Email received:", email);
-            
-            // 1. Pehle patientSignup mein check karo
+        try { 
             const patient = await patientSignup.findOne({ 
                 email: { $regex: new RegExp(`^${email}$`, 'i') }
             });
-            
-            console.log("2. Patient found in signup:", patient ? "Yes" : "No");
-            
+ 
             if (!patient) {
                 throw new Error("Invalid email or password");
             }
-
-            // 2. Password verify karo
-            console.log("3. Retrieving sensitive data...");
-            const sensitiveData = await IPFSService.retrieveAndDecrypt(
+             const sensitiveData = await IPFSService.retrieveAndDecrypt(
                 patient.ipfsCID,
                 patient.ipfsIV
             );
-
-            console.log("4. Sensitive data retrieved:", sensitiveData ? "Yes" : "No");
-            console.log("5. Comparing passwords...");
-            console.log("Input password length:", password.length);
-            console.log("Stored password hash length:", sensitiveData.password.length);
-
-            // Try to hash the input password to compare
             const hashedInputPassword = await bcrypt.hash(password, 10);
-            console.log("Hashed input password length:", hashedInputPassword.length);
-
             const isPasswordValid = await bcrypt.compare(password, sensitiveData.password);
-            console.log("6. Password valid:", isPasswordValid ? "Yes" : "No");
-
             if (!isPasswordValid) {
                 throw new Error("Invalid email or password");
             }
-
-            // 3. Phir addpatientModel mein check karo
-            console.log("7. Checking hospital records...");
             const hospitalPatient = await addpatientModel.findOne({ 
                 email: { $regex: new RegExp(`^${email}$`, 'i') }
             });
-            
-            console.log("8. Patient found in hospital:", hospitalPatient ? "Yes" : "No");
-            
-            // 4. Token generate karo
             const token = jwt.sign(
                 { id: hospitalPatient ? hospitalPatient._id : patient._id, role: 'patient' },
                 process.env.JWT_SECRET,
                 { expiresIn: '30d' }
             );
-
-            console.log("9. Token generated successfully");
 
             return {
                 patient: hospitalPatient || patient,
@@ -197,10 +168,7 @@ const patientLoginService = {
 
 const addpatientService = {
     validatePatientData: async (patientData, userRole) => {
-        try {
-            console.log('Validating patient data:', patientData);
-            console.log('addpatientModel methods:', Object.keys(addpatientModel)); // Check available methods
-            
+        try {  
             if (!patientData.email) {
                 throw new Error("Email is required");
             }
@@ -557,9 +525,6 @@ const patientService = {
             const appointments = await appointmentModel.find({ patientId })
                 .populate('doctorId', 'fullName specialization email experience availability profileimage')
                 .sort({ createdAt: -1 });
-
-            console.log(`Found ${appointments.length} appointments for patient ${patientId}`);
-
             // Total appointments
             const totalAppointments = appointments.length;
 
@@ -593,10 +558,7 @@ const patientService = {
                         const ipfsData = await IPFSService.retrieveAndDecrypt(
                             app.ipfsCID,
                             app.ipfsIV
-                        );
-                        
-                        console.log(`IPFS data for appointment ${app._id}:`, ipfsData);
-                        
+                        ); 
                         return {
                             _id: app._id,
                             doctorName: app.doctorId?.fullName || 'N/A',
@@ -622,10 +584,7 @@ const patientService = {
                     }
                 })
             );
-
-            console.log('Final recent appointments:', recentAppointments);
-
-            // Primary doctor (from most recent appointment)
+           // Primary doctor (from most recent appointment)
             const primaryDoctor = appointments[0]?.doctorId || null;
 
             // Dynamic medical records count

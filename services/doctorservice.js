@@ -14,13 +14,9 @@ const medicalHistoryModel = require('../models/medicalHistory/medicalHistoryMode
 const doctorSignupService = {
     generateWallet: async () => {
         try {
-            const doctorCount = await doctorSignup.countDocuments();
-            console.log("Doctor Count for wallet generation:", doctorCount);
-            
+            const doctorCount = await doctorSignup.countDocuments(); 
             const hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic);
             const wallet = hdNode.deriveChild(doctorCount);
-            console.log("Generated wallet address:", wallet.address);
-
             return {
                 address: wallet.address
             };
@@ -300,13 +296,8 @@ const createdDoctor = {
 
     saveDoctor: async (validatedData) => {
         try {
-            console.log('Saving doctor with data:', validatedData);
-            
-            // Upload sensitive data to IPFS
-            const ipfsResult = await IPFSService.uploadEncryptedData(validatedData.sensitiveData);
-
-            // Create MongoDB document with basic data + IPFS references
-            const mongoData = {
+          const ipfsResult = await IPFSService.uploadEncryptedData(validatedData.sensitiveData);
+           const mongoData = {
                 ...validatedData.mongoData,
                 ipfsCID: ipfsResult.cid,
                 ipfsIV: ipfsResult.iv
@@ -347,8 +338,7 @@ const doctorManagementService = {
                 return [];
             }
 
-            console.log(`Found ${doctors.length} doctors`);
-            return doctors;
+         return doctors;
         } catch (error) {
             console.error('Error in getDoctors service:', error);
             throw new Error(`Failed to fetch doctors: ${error.message}`);
@@ -358,9 +348,6 @@ const doctorManagementService = {
     updateDoctor: async (email, updateData) => {
         try {
             const cleanEmail = email.toLowerCase().trim();
-            console.log('Updating doctor with email:', cleanEmail);
-            console.log('Update data received:', updateData);
-
             const doctor = await adddoctorModel.findOne({ email: cleanEmail });
             if (!doctor) throw new Error("Doctor not found");
 
@@ -395,9 +382,6 @@ const doctorManagementService = {
             if (updateData.profileimage) {
                 insensitiveData.profileimage = updateData.profileimage;
             }
-
-            console.log('Data to update:', insensitiveData);
-
             // First update the doctor document
             const updatedDoctor = await adddoctorModel.findOneAndUpdate(
                 { email: cleanEmail },
@@ -414,9 +398,6 @@ const doctorManagementService = {
             if (!updatedDoctor) {
                 throw new Error("Failed to update doctor");
             }
-
-            console.log('Updated doctor:', updatedDoctor);
-
             // If there's sensitive data to update and IPFS is configured
             if (doctor.ipfsCID) {
                 const sensitiveData = {
@@ -528,25 +509,17 @@ const addAppointmentToDoctor = async (doctorId, appointmentId) => {
 
 const getDoctorDashboardData = async (doctorEmail) => {
     try {
-        console.log('Looking for doctor with email:', doctorEmail);
-        
-        // Get the doctor from adddoctor collection
-        const addDoctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+    const addDoctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
         if (!addDoctor) {
             throw new Error('Doctor profile not found');
         }
 
         const currentDoctorId = addDoctor._id.toString();
-        console.log('Looking for appointments for doctorId:', currentDoctorId);
-
-        // Get ALL appointments (we'll filter by doctorId from IPFS data)
         const allAppointments = await appointmentModel.find({})
             .populate('patientId', 'fullName')
             .sort({ createdAt: -1 });
 
-        console.log(`Found ${allAppointments.length} total appointments in system`);
-
-        // Filter appointments by decrypting IPFS data and checking doctorId
+   // Filter appointments by decrypting IPFS data and checking doctorId
         const doctorAppointments = [];
         const recentAppointmentsWithDetails = [];
         const uniquePatientIds = new Set();
@@ -594,12 +567,7 @@ const getDoctorDashboardData = async (doctorEmail) => {
         const totalAppointments = doctorAppointments.length;
         const totalPatients = uniquePatientIds.size;
 
-        console.log(`Found ${totalAppointments} appointments for doctor ${currentDoctorId}`);
-        console.log(`Found ${totalPatients} unique patients for doctor`);
-
-        // Get medical history count (if doctorId is also in IPFS for medical history)
-        // For now, let's try direct query first
-        let totalMedicalHistory = 0;
+          let totalMedicalHistory = 0;
         try {
             totalMedicalHistory = await medicalHistoryModel.countDocuments({ 
                 doctorId: currentDoctorId 

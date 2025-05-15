@@ -30,7 +30,7 @@ const doctorSignupSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
-});
+},{ versionKey: false });
 
 const DoctorSignup = mongoose.model('DoctorSignup', doctorSignupSchema);
 module.exports = DoctorSignup;

@@ -50,6 +50,7 @@ const signupSchema = new Schema({
         type: Date,
         default: Date.now
     }
-});
+}, {timestamps: true}, { versionKey: false}
+);
 const Signup = mongoose.model("InsuranceSignup", signupSchema);
 module.exports = Signup;

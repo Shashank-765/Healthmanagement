@@ -101,7 +101,8 @@ const patientSignupSchema = new mongoose.Schema({
         trim: true
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    versionKey:false
 });
 
 // Pre-save middleware to calculate age and generate wallet address

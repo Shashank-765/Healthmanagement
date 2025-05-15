@@ -11,6 +11,7 @@ const upload = require('../../utils/multer');
 const InsurancePatient = require('../../models/insurance/insurancePatientModel');
 const AddPatient = require('../../models/patient/addpatientModel');
 const MedicalHistory = require('../../models/medicalHistory/medicalHistoryModel');
+const IPFSService = require('../../services/ipfsService');
 
 module.exports = {
     insuranceSignup: async (req, res) => {
@@ -133,110 +134,83 @@ module.exports = {
     },
     getPatientsWithMedicalHistory: async (req, res) => {
         try {
-            // Get all medical history records with proper error handling
-            const totalMedicalHistory = await MedicalHistory.countDocuments();
-            console.log(totalMedicalHistory);
-            const totalInsurancePatients = await InsurancePatient.countDocuments({ hasAccess: true });
-            const medicalHistories = await MedicalHistory.find({})
+            // Fetch all insurance patients, populate patientId
+            const patients = await InsurancePatient.find({})
+                .select('patientId name email phone medicalHistory isVerified hasAccess accessRequest')
                 .populate({
                     path: 'patientId',
-                    select: 'fullName email contactnumber',
+                    select: 'fullName email contactnumber ipfsCID ipfsIV',
                     model: 'AddPatient'
                 })
-                .populate({
-                    path: 'doctorId',
-                    select: 'fullName',
-                    model: 'adddoctor'
-                });
-
-            if (!medicalHistories || medicalHistories.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    message: "No medical history records found",
-                    data: []
-                });
-            }
-
-            // Process and store in InsurancePatient collection
-            for (const history of medicalHistories) {
-                if (!history.patientId || !history.doctorId) {
-                    console.log('Skipping record with missing patient or doctor:', history._id);
-                    continue;
-                }
-               // Create patient data with default values for missing fields
-                const patientData = {
-                    patientId: history.patientId._id,
-                    name: history.patientId.fullName || 'Unknown',
-                    email: history.patientId.email || 'No email provided',
-                    phone: history.patientId.contactnumber || 'No phone provided',
-                    medicalHistory: [{
-                        condition: history.condition || 'No condition specified',
-                        notes: history.notes || 'No notes available',
-                        date: history.date || new Date(),
-                        doctorId: history.doctorId._id,
-                        doctorName: history.doctorId.fullName || 'Unknown Doctor',
-                        totalMedicalHistory,
-                        totalInsurancePatients
-                    }]
-                };
-
-                try {
-                    // Check if patient already exists in InsurancePatient collection
-                    let insurancePatient = await InsurancePatient.findOne({ patientId: history.patientId._id });
-
-                    if (insurancePatient) {
-                        // Update existing record
-                        insurancePatient.medicalHistory.push(...patientData.medicalHistory);
-                        await insurancePatient.save();
-                    } else {
-                        // Create new record
-                        insurancePatient = new InsurancePatient(patientData);
-                        await insurancePatient.save();
-                    }
-                } catch (error) {
-                    console.log('Error processing patient record:', error.message);
-                    continue; // Skip to next record if there's an error
-                }
-            }
-
-            // Fetch all patients from InsurancePatient collection
-            const patients = await InsurancePatient.find({})
-                .select('name email phone medicalHistory isVerified hasAccess')
                 .sort({ createdAt: -1 });
 
-            // Format the response based on access rights
-            const formattedPatients = patients.map(patient => {
+            const uniquePatientsMap = new Map();
+            for (const patient of patients) {
+                const key = patient.patientId ? patient.patientId._id.toString() : patient._id.toString();
+                // Always keep the latest record (so verify/update reflects)
+                uniquePatientsMap.set(key, patient);
+            }
+            const uniquePatients = Array.from(uniquePatientsMap.values());
+
+            // Now process only unique patients
+            const formattedPatients = await Promise.all(uniquePatients.map(async patient => {
+                // Get contact number from multiple sources
+                let contactNumber = patient.phone || 'Not Available';
+                
+                // Try to get contact number from MongoDB first via patientId
+                if (patient.patientId && patient.patientId.contactnumber) {
+                    contactNumber = patient.patientId.contactnumber;
+                } 
+                // If not available in MongoDB, get from IPFS
+                else if (patient.patientId && patient.patientId.ipfsCID && patient.patientId.ipfsIV) {
+                    try {
+                        const ipfsData = await IPFSService.retrieveAndDecrypt(
+                            patient.patientId.ipfsCID,
+                            patient.patientId.ipfsIV
+                        );
+                        
+                         contactNumber = ipfsData.contactNumber || 
+                                     ipfsData.phoneNumber || 
+                                     ipfsData.contactnumber || 
+                                     ipfsData.phone ||
+                                     contactNumber;
+                    } catch (error) {
+                        console.error(`Error retrieving IPFS data for patient:`, error);
+                        // Keep the original contact number if IPFS fails
+                    }
+                }
+
                 const basicInfo = {
                     _id: patient._id,
-                    name: patient.name || 'Unknown',
-                    email: patient.email || 'No email provided',
-                    phone: patient.phone || 'No phone provided',
+                    name: patient.name || (patient.patientId ? patient.patientId.fullName : 'Unknown'),
+                    email: patient.email || (patient.patientId ? patient.patientId.email : 'No email provided'),
+                    phone: contactNumber,
                     isVerified: patient.isVerified || false,
                     hasAccess: patient.hasAccess || false,
+                    requestPending: patient.accessRequest && patient.accessRequest.status === 'pending'
                 };
 
                 // If access is granted, include medical history
                 if (patient.hasAccess) {
                     return {
                         ...basicInfo,
-                        medicalHistory: patient.medicalHistory.map(history => ({
-                            condition: history.condition || 'No condition specified',
-                            notes: history.notes || 'No notes available',
-                            date: history.date || new Date(),
-                            doctorName: history.doctorName || 'Unknown Doctor'
-                        }))
+                        medicalHistory: patient.medicalHistory && patient.medicalHistory.length > 0 ? 
+                            patient.medicalHistory.map(history => ({
+                                condition: history.condition || 'No condition specified',
+                                notes: history.notes || 'No notes available',
+                                date: history.date || new Date(),
+                                doctorName: history.doctorName || 'Unknown Doctor'
+                            })) : []
                     };
                 }
 
                 // If no access, only return basic info
                 return basicInfo;
-            });
+            }));
 
             res.status(200).json({
                 success: true,
                 message: "Patients with medical history fetched successfully",
-                totalMedicalHistory: totalMedicalHistory,
-                totalInsurancePatients: totalInsurancePatients,
                 data: formattedPatients
             });
         } catch (error) {
@@ -401,13 +375,40 @@ module.exports = {
                 })
                 .sort({ date: -1 });
 
-            // Format the response
-            const formattedHistory = medicalHistory.map(record => ({
-                patientName: patient.fullName || 'Unknown Patient',
-                doctorName: record.doctorId?.fullName || 'Unknown Doctor',
-                condition: record.condition || 'No condition specified',
-                notes: record.notes || 'No notes available',
-                date: record.date
+            // Process each medical history record to get IPFS data
+            const formattedHistory = await Promise.all(medicalHistory.map(async (record) => {
+                let condition = record.condition || 'No condition specified';
+                let notes = record.notes || 'No notes available';
+                let doctorName = record.doctorId?.fullName || 'Unknown Doctor';
+
+                // Try to get data from IPFS if available
+                if (record.ipfsCID && record.ipfsIV) {
+                    try {
+                        const ipfsData = await IPFSService.retrieveAndDecrypt(
+                            record.ipfsCID,
+                            record.ipfsIV
+                        );
+                        
+                        // Get condition and notes from IPFS
+                        condition = ipfsData.condition || condition;
+                        notes = ipfsData.notes || notes;
+                        // Get doctor name from IPFS if available
+                        if (ipfsData.doctorName) {
+                            doctorName = ipfsData.doctorName;
+                        }
+                    } catch (error) {
+                        console.error(`Error retrieving IPFS data for medical history ${record._id}:`, error);
+                        // Continue with MongoDB data if IPFS fails
+                    }
+                }
+
+                return {
+                    patientName: patient.fullName || 'Unknown Patient',
+                    doctorName: doctorName,
+                    condition: condition,
+                    notes: notes,
+                    date: record.date
+                };
             }));
 
             res.status(200).json({
@@ -523,6 +524,102 @@ module.exports = {
             res.status(500).json({
                 success: false,
                 message: "Error fetching pending requests",
+                error: error.message
+            });
+        }
+    },
+    syncMedicalHistoryData: async (req, res) => {
+        try {
+            // Get all medical history records with proper error handling
+            const medicalHistories = await MedicalHistory.find({})
+                .populate({
+                    path: 'patientId',
+                    select: 'fullName email contactnumber',
+                    model: 'AddPatient'
+                })
+                .populate({
+                    path: 'doctorId',
+                    select: 'fullName',
+                    model: 'adddoctor'
+                });
+
+            if (!medicalHistories || medicalHistories.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    message: "No medical history records found to sync",
+                });
+            }
+
+            let processedCount = 0;
+            let skippedCount = 0;
+
+            // Process and store in InsurancePatient collection
+            for (const history of medicalHistories) {
+                if (!history.patientId || !history.doctorId) {
+                    skippedCount++;
+                    continue;
+                }
+                
+                // Create patient data with default values for missing fields
+                const patientData = {
+                    patientId: history.patientId._id,
+                    name: history.patientId.fullName || 'Unknown',
+                    email: history.patientId.email || 'No email provided',
+                    phone: history.patientId.contactnumber || 'No phone provided',
+                    medicalHistory: [{
+                        condition: history.condition || 'No condition specified',
+                        notes: history.notes || 'No notes available',
+                        date: history.date || new Date(),
+                        doctorId: history.doctorId._id,
+                        doctorName: history.doctorId.fullName || 'Unknown Doctor'
+                    }]
+                };
+
+                try {
+                    // Check if patient already exists in InsurancePatient collection
+                    let insurancePatient = await InsurancePatient.findOne({ patientId: history.patientId._id });
+
+                    if (insurancePatient) {
+                        // Check if this medical history is already included
+                        const historyExists = insurancePatient.medicalHistory.some(
+                            h => h.doctorId && 
+                                 h.doctorId.equals(history.doctorId._id) && 
+                                 new Date(h.date).toDateString() === new Date(history.date).toDateString()
+                        );
+
+                        if (!historyExists) {
+                            // Only add if not already exists
+                            insurancePatient.medicalHistory.push(...patientData.medicalHistory);
+                            await insurancePatient.save();
+                            processedCount++;
+                        }
+                    } else {
+                        // Create new record
+                        insurancePatient = new InsurancePatient(patientData);
+                        await insurancePatient.save();
+                        processedCount++;
+                    }
+                } catch (error) {
+                    console.log('Error processing patient record:', error.message);
+                    skippedCount++;
+                    continue; // Skip to next record if there's an error
+                }
+            }
+
+            res.status(200).json({
+                success: true,
+                message: "Medical history sync completed",
+                stats: {
+                    totalRecords: medicalHistories.length,
+                    processedCount,
+                    skippedCount
+                }
+            });
+        } catch (error) {
+            console.log('Error syncing medical history data:', error.message);
+            res.status(500).json({
+                success: false,
+                message: "Error syncing medical history data",
                 error: error.message
             });
         }

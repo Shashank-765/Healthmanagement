@@ -96,7 +96,7 @@ const addpatientSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Doctor'
     }
-}, { timestamps: true });
+}, { timestamps: true }, { versionKey: false });
 
 // Add pre-save middleware to ensure patientId is set
 addpatientSchema.pre('save', function(next) {

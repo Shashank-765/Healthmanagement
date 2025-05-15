@@ -218,10 +218,6 @@ module.exports = {
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
-
-            console.log('Received filters:', filters);
-            console.log('Pagination params:', { page, limit, skip });
-
             // Build query
             let query = {};
             if (filters.specialization) {
@@ -233,21 +229,15 @@ module.exports = {
 
             // Count total matching docs
             const totalCount = await adddoctorModel.countDocuments(query);
-            console.log('Total count of matching doctors:', totalCount);
-
-            // Fetch all doctor data including IPFS references
+       // Fetch all doctor data including IPFS references
             const doctors = await adddoctorModel.find(query)
                 .select('profileimage fullName specialization experience availability contactnumber email qualification address bio ipfsCID ipfsIV')
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .lean();
-
-            console.log('Raw doctors data from DB:', doctors);
-
             if (doctors.length === 0) {
-                console.log('No doctors found with the given filters');
-                return res.status(200).json({
+                   return res.status(200).json({
                     success: true,
                     message: "No doctors found with the given filters",
                     data: [],
@@ -264,8 +254,6 @@ module.exports = {
                     const needsIPFSData = !doctor.specialization || !doctor.contactnumber || doctor.experience === undefined;
                     
                     if (needsIPFSData && doctor.ipfsCID && doctor.ipfsIV) {
-                        console.log(`Retrieving IPFS data for doctor: ${doctor.fullName}`);
-                        
                         try {
                             const ipfsData = await IPFSService.retrieveAndDecrypt(
                                 doctor.ipfsCID,
@@ -392,8 +380,6 @@ module.exports = {
                     console.error("Error deleting file:", err);
                 }
             }
-
-            console.error('Error in updateDoctor controller:', error);
             const statusCode = error.message.includes("not found") ? 404 : 500;
             return res.status(statusCode).json({
                 success: false,
@@ -421,7 +407,6 @@ module.exports = {
                 message: "Doctor deleted successfully"
             });
         } catch (error) {
-            console.error('Error in deleteDoctor controller:', error);
             const statusCode = error.message.includes("not found") ? 404 : 500;
             return res.status(statusCode).json({
                 success: false,
@@ -493,8 +478,7 @@ module.exports = {
             const dashboardData = await getDoctorDashboardData(doctorEmail || req.user.email);
             res.status(200).json(dashboardData);
         } catch (error) {
-            console.error('Error in getDoctorDashboard:', error);
-            // Handle specific MongoDB ObjectId casting error
+    // Handle specific MongoDB ObjectId casting error
             if (error.name === 'CastError' && error.kind === 'ObjectId') {
                 return res.status(400).json({
                     success: false,
@@ -555,7 +539,6 @@ module.exports = {
                         signupDoctor.ipfsCID,
                         signupDoctor.ipfsIV
                     );
-                    console.log('Retrieved IPFS data:', sensitiveData); // Debug log
                 } catch (error) {
                     console.error('Error retrieving IPFS data:', error);
                 }
@@ -601,5 +584,3 @@ module.exports = {
         }
     }
 };
-//profileimage, fullname,specalization,experience,avaiability,contactnumber,email,rating,patientsin numbers. and about(bio).
-

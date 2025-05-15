@@ -90,7 +90,7 @@ const adddoctorSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     }
-}, { timestamps: true });
+}, { timestamps: true },{versionKey:false});
 
 // Add pre-save middleware to ensure doctorId is set
 adddoctorSchema.pre('save', function(next) {

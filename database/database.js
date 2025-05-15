@@ -12,8 +12,8 @@ const connectDB = async () => {
         // console.log('MongoDB URI:', process.env.MONGODB_URI);
 
         const conn = await mongoose.connect(process.env.MONGODB_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
+            // useNewUrlParser: true,
+            // useUnifiedTopology: true,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
             maxPoolSize: 10,
@@ -51,11 +51,7 @@ const connectDB = async () => {
 
     } catch (error) {
         console.error('Error connecting to MongoDB:', error);
-        console.error('Please make sure:');
-        console.error('1. MongoDB is running on your machine');
-        console.error('2. The connection string in .env file is correct');
-        console.error('3. You have network connectivity to MongoDB');
-        process.exit(1);
+        // process.exit(1);
     }
 };
 

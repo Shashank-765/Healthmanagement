@@ -21,7 +21,7 @@ const patientLoginSchema = new Schema({
     }
 }, { 
     timestamps: true,
-    versionKey: false  // This will remove the __v field
+    versionKey: false
 });
 
 const PatientLogin = mongoose.model('PatientLogin', patientLoginSchema);

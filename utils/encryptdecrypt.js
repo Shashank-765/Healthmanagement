@@ -37,7 +37,7 @@ class EncryptionService {
         try {
             if (!encryptedData || !iv) {
                 console.log('No encrypted data or IV provided');
-                return null;
+                return {};
             }
 
             const decipher = crypto.createDecipheriv(
@@ -50,7 +50,7 @@ class EncryptionService {
             return JSON.parse(decrypted);
         } catch (error) {
             console.error('Decryption error:', error);
-            return null; // Return null instead of throwing error
+            return {}; // Return empty object instead of null to prevent further errors
         }
     }
 

@@ -88,34 +88,25 @@ const appointmentController = {
 
     getPatientAppointmentsByName: async (req, res) => {
         try {
-            console.log('User from token:', req.user);
-            const patientEmail = req.user.email.toLowerCase();
-            console.log('Looking for patient with email:', patientEmail);
-            
+       const patientEmail = req.user.email.toLowerCase();  
             // Find patient in addpatientModel using email
             const patient = await addpatientModel.findOne({ 
                 email: patientEmail 
             });
             
             if (!patient) {
-                console.log('Patient not found in addpatientModel');
-                return res.status(404).json({
+            return res.status(404).json({
                     success: false,
                     message: "Patient not found"
                 });
             }
             
             const patientId = patient._id;
-            console.log('Found patient with ID:', patientId);
-            console.log('Looking for appointments with patientId:', patientId);
-            
+           
             // Get appointments with populated doctor info
             const appointments = await appointmentModel.find({ patientId })
                 .populate('doctorId', 'fullName specialization')
                 .sort({ createdAt: -1 });
-
-            console.log('Found appointments:', appointments);
-
             // Get IPFS data for each appointment
             const appointmentsWithDetails = await Promise.all(appointments.map(async (appointment) => {
                 try {
@@ -141,8 +132,7 @@ const appointmentController = {
                         updatedAt: appointment.updatedAt
                     };
                 } catch (error) {
-                    console.error('Error retrieving IPFS data for appointment:', appointment._id, error);
-                    return {
+                      return {
                         _id: appointment._id,
                         doctor: {
                             id: appointment.doctorId._id,
@@ -154,8 +144,6 @@ const appointmentController = {
                 }
             }));
 
-            console.log('Final processed appointments:', appointmentsWithDetails);
-
             // Return 200 with empty array if no appointments found
             res.status(200).json({
                 success: true,
@@ -164,8 +152,7 @@ const appointmentController = {
                 data: appointmentsWithDetails
             });
         } catch (error) {
-            console.error('Error in getPatientAppointmentsByName:', error);
-            res.status(500).json({
+           res.status(500).json({
                 success: false,
                 message: error.message || "Failed to fetch appointments"
             });
@@ -659,7 +646,6 @@ const appointmentController = {
                     appointment.ipfsCID,
                     appointment.ipfsIV
                 );
-                console.log('Current IPFS data:', currentIPFSData);
             } catch (error) {
                 console.error('Error retrieving current IPFS data:', error);
                 return res.status(500).json({

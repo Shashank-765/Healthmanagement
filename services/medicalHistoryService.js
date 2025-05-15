@@ -7,9 +7,6 @@ const IPFSService = require('../services/ipfsService');
 const medicalHistoryService = {
     createMedicalHistory: async ({ patientId, condition, notes, date }) => {
         try {
-            console.log("=== Starting Medical History Service ===");
-            console.log("1. Received data:", { patientId, condition, notes, date });
-
             // Prepare history object for IPFS
             const historyObj = {
                 patientId,
@@ -28,41 +25,24 @@ const medicalHistoryService = {
                 ipfsCID: cid,
                 ipfsIV: iv
             });
-
-            console.log("6. Saving to database...");
             await newHistory.save();
             console.log("7. Database save successful:", {
                 id: newHistory._id,
                 ipfsCID: newHistory.ipfsCID,
                 ipfsIV: newHistory.ipfsIV
             });
-
-            // Populate the record
-            console.log("8. Populating record with patient and doctor details");
-            const populatedHistory = await medicalHistoryModel.findById(newHistory._id)
+                const populatedHistory = await medicalHistoryModel.findById(newHistory._id)
                 .populate('patientId', 'fullName email')
                 .populate('doctorId', 'fullName email');
 
-            // Decrypt IPFS data for response
-            console.log("9. Decrypting IPFS data for response");
             const ipfsData = await IPFSService.retrieveAndDecrypt(cid, iv);
-            console.log("10. IPFS data decrypted successfully");
-
             const result = {
                 ...populatedHistory.toObject(),
                 ...ipfsData
             };
-            console.log("11. Final response prepared:", {
-                id: result._id,
-                patientId: result.patientId,
-                doctorId: result.doctorId,
-                ipfsCID: result.ipfsCID,
-                ipfsIV: result.ipfsIV
-            });
 
             return result;
         } catch (error) {
-            console.error("❌ Error in createMedicalHistory service:", error);
             console.error("Error stack:", error.stack);
             throw new Error(`Failed to create medical history: ${error.message}`);
         }
@@ -348,30 +328,17 @@ const medicalHistoryService = {
 
     editMedicalHistory: async (id, updateData) => {
         try {
-            console.log('\n=== Starting Medical History Edit ===');
-            console.log('1. Input:', { id, updateData });
-
-            // Find the current medical history record
-            console.log('2. Finding medical history record');
             const currentHistory = await medicalHistoryModel.findById(id);
-
             if (!currentHistory) {
-                console.log('❌ Medical history not found');
-                throw new Error('Medical history not found');
+              throw new Error('Medical history not found');
             }
-            console.log('✅ Found medical history:', {
-                id: currentHistory._id,
-                version: currentHistory.version
-            });
 
             // Validate required fields
             if (!updateData.condition || !updateData.notes) {
-                console.log('❌ Missing required fields');
+                console.log(' Missing required fields');
                 throw new Error('Condition and notes are required fields');
             }
 
-            // Prepare data for IPFS
-            console.log('3. Preparing data for IPFS');
             const sensitiveData = {
                 patientId: currentHistory.patientId,
                 doctorId: currentHistory.doctorId,
@@ -382,18 +349,11 @@ const medicalHistoryService = {
                 version: (currentHistory.version || 0) + 1
             };
 
-            // Upload to IPFS
-            console.log('4. Uploading to IPFS');
             const { cid, iv } = await IPFSService.uploadEncryptedData(sensitiveData);
-            console.log('✅ IPFS upload successful:', { cid, iv });
-
             if (!cid || !iv) {
-                console.log('❌ IPFS upload failed');
-                throw new Error('IPFS upload failed - missing CID or IV');
+             throw new Error('IPFS upload failed - missing CID or IV');
             }
 
-            // Create new history record with updated version
-            console.log('5. Creating new history record');
             const newHistory = new medicalHistoryModel({
                 patientId: currentHistory.patientId,
                 doctorId: currentHistory.doctorId,
@@ -409,27 +369,18 @@ const medicalHistoryService = {
             });
 
             // Save the new record
-            console.log('6. Saving new record');
             const savedHistory = await newHistory.save();
-            console.log('✅ New record saved:', savedHistory._id);
-
-            // Populate the record
-            console.log('7. Populating record');
             const populatedHistory = await medicalHistoryModel.findById(savedHistory._id)
                 .populate('patientId', 'fullName email')
                 .populate('doctorId', 'fullName email');
 
             if (!populatedHistory) {
-                console.log('❌ Failed to retrieve saved record');
+                console.log(' Failed to retrieve saved record');
                 throw new Error('Failed to retrieve saved medical history');
             }
 
             // Decrypt IPFS data for response
-            console.log('8. Decrypting IPFS data');
             const ipfsData = await IPFSService.retrieveAndDecrypt(cid, iv);
-            console.log(' Data decryption successful');
-
-            console.log('=== Medical History Edit Complete ===\n');
             return {
                 success: true,
                 message: 'Medical history updated successfully',
@@ -446,10 +397,7 @@ const medicalHistoryService = {
 
     createPatientSelfHistory: async ({ fullName, doctorName, condition, notes, date }) => {
         try {
-            console.log('Creating self history with:', { fullName, doctorName, condition, notes, date });
-            
-            // Try partial, case-insensitive match
-            let patient = await patientModel.findOne({
+             let patient = await patientModel.findOne({
                 fullName: { $regex: fullName, $options: 'i' }
             });
 
@@ -464,9 +412,6 @@ const medicalHistoryService = {
                 console.log('Patient not found:', fullName);
                 throw new Error('Patient not found');
             }
-            console.log('Found patient:', patient._id);
-
-            // Find doctor by name if provided
             let doctorId = null;
             if (doctorName && doctorName !== 'Self') {
                 const doctor = await doctorModel.findOne({ fullName: doctorName });
@@ -485,13 +430,7 @@ const medicalHistoryService = {
                 notes,
                 date: date || new Date()
             };
-            console.log('Prepared history object for IPFS:', historyObj);
-
-            // Upload to IPFS
             const { cid, iv } = await IPFSService.uploadEncryptedData(historyObj);
-            console.log('Uploaded to IPFS:', { cid, iv });
-
-            // Create new medical history record (without condition and notes in MongoDB)
             const newHistory = new medicalHistoryModel({
                 patientId: patient._id,
                 doctorId: doctorId || null,
@@ -501,11 +440,7 @@ const medicalHistoryService = {
                 ipfsIV: iv,
                 version: 1
             });
-            console.log('Created new history record:', newHistory);
-
             await newHistory.save();
-            console.log('Saved history record successfully');
-
             return {
                 success: true,
                 message: "Medical history created successfully",
@@ -530,9 +465,7 @@ const medicalHistoryService = {
     },
 
     getMedicalHistoryByDoctor: async (doctorId) => {
-        try {
-            console.log('Fetching medical history for doctor:', doctorId);
-            
+        try {  
             const records = await medicalHistoryModel.find({ doctorId })
                 .populate({
                     path: 'patientId',
@@ -546,10 +479,7 @@ const medicalHistoryService = {
                 })
                 .lean();
 
-            console.log(`2. Found ${records.length} records`);
-
-            // Log records with null patientId for debugging
-            const recordsWithNullPatient = records.filter(record => !record.patientId);
+          const recordsWithNullPatient = records.filter(record => !record.patientId);
             if (recordsWithNullPatient.length > 0) {
                 console.log('Found records with null patientId:', recordsWithNullPatient.map(r => ({
                     _id: r._id,
@@ -580,16 +510,6 @@ const medicalHistoryService = {
                         }
                         
                         const doctorName = record.doctorId?.fullName || record.doctorName || 'N/A';
-                        
-                        // Log record details for debugging
-                        // console.log('Processing record:', {
-                        //     _id: record._id,
-                        //     patientId,
-                        //     patientName,
-                        //     doctorName,
-                        //     hasIPFSData: !!ipfsData,
-                        //     date: record.date
-                        // });
                         
                         return {
                             _id: record._id,

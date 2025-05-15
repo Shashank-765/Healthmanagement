@@ -6,10 +6,7 @@ const IPFSService = require('../services/ipfsService');
 
 const appointmentService = {
     createAppointment: async (appointmentData) => {
-        try {
-            console.log("1. Starting appointment creation process...");
-            console.log("Patient ID received:", appointmentData.patientId);
-            
+        try {        
             // Basic field validation
             if (!appointmentData.department || !appointmentData.doctorId || !appointmentData.appointmentDate || 
                 !appointmentData.appointmentTime || !appointmentData.reason) {
@@ -105,8 +102,7 @@ const appointmentService = {
                 // Upload to IPFS
                 ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
             } catch (ipfsError) {
-                console.error("IPFS upload failed:", ipfsError);
-                throw new Error("Failed to store appointment data securely");
+              throw new Error("Failed to store appointment data securely");
             }
 
             // Create appointment with only essential references in MongoDB
@@ -195,17 +191,14 @@ const appointmentService = {
                 }
             };
         } catch (error) {
-            console.log("❌ Error fetching patient appointments:", error);
+            console.log(" Error fetching patient appointments:", error);
             throw error;
         }
     },
 
     getDoctorAppointments: async (doctorName) => {
         try {
-            console.log("1. Finding doctor by name...");
-
-            // Find doctor by name (case-insensitive)
-            const doctor = await addDoctorModel.findOne({
+      const doctor = await addDoctorModel.findOne({
                 fullName: { $regex: new RegExp(`^${doctorName}$`, 'i') }
             });
 
@@ -219,9 +212,7 @@ const appointmentService = {
                 .populate('doctorId', 'fullName specialization')
                 .sort({ appointmentDate: 1, appointmentTime: 1 });
 
-            console.log(`2. Found ${appointments.length} appointments for doctor`);
-
-            return {
+              return {
                 success: true,
                 message: "Doctor appointments fetched successfully",
                 data: {
@@ -241,10 +232,7 @@ const appointmentService = {
     },
 
     getAllDoctorsWithAppointments: async () => {
-        try {
-            console.log("1. Fetching all doctors...");
-
-            // Get all doctors
+        try { 
             const doctors = await addDoctorModel.find()
                 .select('fullName specialization experience availability');
 
@@ -266,9 +254,6 @@ const appointmentService = {
                     totalAppointments: appointments.length
                 };
             }));
-
-            console.log(`2. Found ${doctors.length} doctors`);
-
             return {
                 success: true,
                 message: "All doctors and their appointments fetched successfully",
@@ -285,8 +270,6 @@ const appointmentService = {
 
     deleteAppointmentByPatientName: async (patientName, doctorId) => {
         try {
-            console.log("1. Finding patient and appointment...");
-
             // Find patient by name
             const patient = await addPatientModel.findOne({
                 fullName: { $regex: new RegExp(`^${patientName}$`, 'i') }
@@ -318,9 +301,6 @@ const appointmentService = {
 
             // Delete the appointment
             await appointmentModel.findByIdAndDelete(appointment._id);
-
-            console.log("2. Appointment deleted successfully");
-
             return {
                 success: true,
                 message: "Appointment deleted successfully",
@@ -339,9 +319,6 @@ const appointmentService = {
 
     updatePatientStatus: async (patientName, doctorName, status) => {
         try {
-            console.log("1. Finding doctor and patient...");
-
-            // Find doctor by name
             const doctor = await addDoctorModel.findOne({
                 fullName: { $regex: new RegExp(`^${doctorName}$`, 'i') }
             });
@@ -381,9 +358,6 @@ const appointmentService = {
                 { new: true }
             ).populate('patientId', 'fullName email')
              .populate('doctorId', 'fullName specialization');
-
-            console.log(`2. Appointment status updated to ${status}`);
-
             return {
                 success: true,
                 message: `Appointment status updated to ${status} successfully`,
@@ -398,7 +372,7 @@ const appointmentService = {
                 }
             };
         } catch (error) {
-            console.log("❌ Error updating appointment status:", error.message);
+            console.log(" Error updating appointment status:", error.message);
             throw error;
         }
     },
@@ -475,9 +449,6 @@ const appointmentService = {
 
             // Delete the appointment
             await appointmentModel.findByIdAndDelete(appointment._id);
-
-            console.log("2. Pending appointment deleted successfully");
-
             return {
                 success: true,
                 message: "Your pending appointment has been deleted successfully",
@@ -491,7 +462,7 @@ const appointmentService = {
                 }
             };
         } catch (error) {
-            console.log("❌ Error deleting patient appointment:", error.message);
+            console.log(" Error deleting patient appointment:", error.message);
             throw error;
         }
     },
@@ -568,24 +539,14 @@ const appointmentService = {
             const appointments = await appointmentModel.find({ doctorId: doctor._id })
                 .populate('patientId', 'fullName email')
                 .sort({ createdAt: -1 });
-
-            console.log('Found appointments before IPFS:', appointments);
-
             // Get IPFS data for each appointment
             const appointmentsWithDetails = await Promise.all(appointments.map(async (appointment) => {
                 try {
-                    console.log('Processing appointment:', appointment._id);
-                    console.log('IPFS CID:', appointment.ipfsCID);
-                    console.log('IPFS IV:', appointment.ipfsIV);
-
                     // Get sensitive data from IPFS
                     const sensitiveData = await IPFSService.retrieveAndDecrypt(
                         appointment.ipfsCID,
                         appointment.ipfsIV
                     );
-
-                    console.log('Retrieved sensitive data:', sensitiveData);
-
                     // Ensure we have valid date and time
                     const appointmentDate = sensitiveData.appointmentDate || new Date().toISOString().split('T')[0];
                     const appointmentTime = sensitiveData.appointmentTime || '12:00 PM';

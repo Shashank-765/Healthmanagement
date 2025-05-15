@@ -16,4 +16,7 @@ router.get("/patient-medical-history/:patientName", authenticateToken, insurance
 router.get("/pending-requests", authenticateToken, insuranceController.getPendingAccessRequests);
 router.post("/handle-access-request", authenticateToken, insuranceController.handleAccessRequest);
 
+// Add manual sync route - ideally this would be an admin operation or triggered by a cron job
+router.post("/sync-medical-history", authenticateToken, insuranceController.syncMedicalHistoryData);
+
 module.exports = router; 
