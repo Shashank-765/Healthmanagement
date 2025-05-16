@@ -241,49 +241,15 @@ module.exports = {
     fetchdataConfirmedAppointments: async (req, res) => {
         try {
             const { search, page = 1 } = req.query;
-            const limit = 5; // 5 rows per page
+            const limit = 10; // 50 rows per page
             const skip = (page - 1) * limit;
             
-            // First find all appointments
-            const appointments = await appointmentModel.find()
+            // Find appointments with status "confirm" directly from MongoDB
+            const appointments = await appointmentModel.find({ status: "confirm" })
                 .populate('doctorId', 'fullName specialization')
                 .populate('patientId', 'fullName');
             
             if(!appointments || appointments.length === 0){
-                return res.status(404).json({
-                    success: false,
-                    message: "No appointments found"
-                });
-            }
-
-            // Process appointments to get status from IPFS
-            const processedAppointments = await Promise.all(appointments.map(async (appointment) => {
-                let status = 'pending'; // default status
-                
-                // Try to get status from IPFS if available
-                if (appointment.ipfsCID && appointment.ipfsIV) {
-                    try {
-                        const ipfsData = await IPFSService.retrieveAndDecrypt(
-                            appointment.ipfsCID,
-                            appointment.ipfsIV
-                        );
-                        status = ipfsData.status || 'pending';
-                    } catch (error) {
-                        console.error(`Error retrieving IPFS data for appointment ${appointment._id}:`, error);
-                        // Keep default status if IPFS retrieval fails
-                    }
-                }
-
-                return {
-                    ...appointment.toObject(),
-                    status: status
-                };
-            }));
-
-            // Filter confirmed appointments
-            let confirmedAppointments = processedAppointments.filter(app => app.status === "confirm");
-            
-            if(confirmedAppointments.length === 0) {
                 return res.status(404).json({
                     success: false,
                     message: "No confirmed appointments found"
@@ -291,7 +257,7 @@ module.exports = {
             }
 
             // Filter the results based on search term
-            let filteredAppointments = confirmedAppointments;
+            let filteredAppointments = appointments;
             
             if(search) {
                 const searchTerm = search.toLowerCase();
@@ -324,7 +290,7 @@ module.exports = {
                 },
                 appointmentDate: appointment.appointmentDate,
                 appointmentTime: appointment.appointmentTime,
-                status: appointment.status || 'Confirmed'
+                status: appointment.status
             }));
 
             return res.status(200).json({
@@ -349,7 +315,7 @@ module.exports = {
     fetchdataPendingAppointments: async (req, res) => {
         try {
             const { search, page = 1 } = req.query;
-            const limit = 10; // 5 rows per page
+            const limit = 10; // 10 rows per page
             const skip = (page - 1) * limit;
             
             // First find all appointments
@@ -397,8 +363,9 @@ module.exports = {
                     message: "No pending appointments found"
                 });
             }
+
+            // Apply search filter if provided
             let filteredAppointments = pendingAppointments;
-            
             if(search) {
                 const searchTerm = search.toLowerCase();
                 filteredAppointments = filteredAppointments.filter(appointment => 
@@ -414,10 +381,12 @@ module.exports = {
                 });
             }
 
+            // Apply pagination
             const totalAppointments = filteredAppointments.length;
             const totalPages = Math.ceil(totalAppointments / limit);
             const paginatedAppointments = filteredAppointments.slice(skip, skip + limit);
 
+            // Format the appointments
             const formattedAppointments = paginatedAppointments.map(appointment => ({
                 _id: appointment._id,
                 doctorId: {
@@ -429,7 +398,7 @@ module.exports = {
                 },
                 appointmentDate: appointment.appointmentDate,
                 appointmentTime: appointment.appointmentTime,
-                status: appointment.status || 'Pending'
+                status: appointment.status
             }));
 
             return res.status(200).json({

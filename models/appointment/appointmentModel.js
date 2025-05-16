@@ -11,6 +11,11 @@ const appointmentSchema = new mongoose.Schema({
         ref: 'adddoctor',
         required: true
     },
+    status: {
+        type: String,
+        enum: ['pending', 'confirm'],
+        default: 'pending'
+    },
     ipfsCID: {
         type: String,
         required: true
@@ -19,7 +24,7 @@ const appointmentSchema = new mongoose.Schema({
         type: String,
         required: true
     }
-}, { timestamps: true },{versionKey:false});
+}, { timestamps: true }, {versionKey:false});
 
 // Remove indexes that are no longer needed since fields are in IPFS
 // appointmentSchema.index({ patientEmail: 1 });
