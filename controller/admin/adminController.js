@@ -10,6 +10,7 @@ const IPFSService = require('../../services/ipfsService');
 const InsurancePatient = require('../../models/insurance/insurancePatientModel');
 const AddPatient = require('../../models/patient/addpatientModel');
 const MedicalHistory = require('../../models/medicalHistory/medicalHistoryModel');
+const jwt = require('jsonwebtoken');
 // const adminLoginModel = require('../models/admin/adminloginModel');
 
 module.exports = {
@@ -25,12 +26,9 @@ module.exports = {
                 message: "Admin registered successfully",
                 data: {
                     _id: savedAdmin._id,
-                    fullName: savedAdmin.fullName,
                     email: savedAdmin.email,
-                    hospitalName: savedAdmin.hospitalName,
-                    totalHospitals: savedAdmin.totalHospitals,
-                    totalBeds: savedAdmin.totalBeds,
-                    staffInformation: savedAdmin.staffInformation
+                    ipfsCID: savedAdmin.ipfsCID,
+                    ipfsIV: savedAdmin.ipfsIV
                 }
             });
 
@@ -55,7 +53,7 @@ module.exports = {
     adminLogin: async (req, res) => {
         try {
             // Validate login using service
-            const { admin, token } = await adminLoginService.validateLogin(
+            const { admin, adminData, token } = await adminLoginService.validateLogin(
                 req.body.email,
                 req.body.password
             );
@@ -113,6 +111,19 @@ module.exports = {
                 });
             }
 
+            // Get IPFS data if CID exists
+            let ipfsData = {};
+            if (admin.ipfsCID && admin.ipfsIV) {
+                try {
+                    console.log('Fetching IPFS data for admin:', admin.ipfsCID);
+                    ipfsData = await IPFSService.retrieveAndDecrypt(admin.ipfsCID, admin.ipfsIV);
+                    console.log('IPFS data fetched:', ipfsData);
+                } catch (ipfsError) {
+                    console.error('Error fetching IPFS data:', ipfsError);
+                    // Continue with default values if IPFS fetch fails
+                }
+            }
+
             const totalpatients = await patientSignupModel.countDocuments();
             const totaldoctors = await doctorSignupModel.countDocuments();
             const newPatients = await addpatientModel.countDocuments();
@@ -162,12 +173,17 @@ module.exports = {
                 status: appointment.status
             }));
 
-            // Calculate total staff as a number
-            const totalStaff = Number(admin.staffInformation.nurses) +
-                Number(admin.staffInformation.receptionists) +
-                Number(admin.staffInformation.otherStaff);
+            // Get staff information from IPFS data with fallbacks
+            const staffInfo = {
+                nurses: Number(ipfsData?.staffInformation?.nurses || ipfsData?.nurses || admin.staffInformation?.nurses || 0),
+                receptionists: Number(ipfsData?.staffInformation?.receptionists || ipfsData?.receptionists || admin.staffInformation?.receptionists || 0),
+                otherStaff: Number(ipfsData?.staffInformation?.otherStaff || ipfsData?.otherStaff || admin.staffInformation?.otherStaff || 0)
+            };
 
-            // Return admin data with raw numbers
+            // Calculate total staff
+            const totalStaff = staffInfo.nurses + staffInfo.receptionists + staffInfo.otherStaff;
+
+            // Return admin data with IPFS data
             return res.status(200).json({
                 success: true,
                 message: "Admin data fetched successfully",
@@ -175,18 +191,18 @@ module.exports = {
                     _id: admin._id,
                     fullName: admin.fullName,
                     email: admin.email,
-                    hospitalName: admin.hospitalName,
-                    totalHospitals: Number(admin.totalHospitals),
-                    totalBeds: Number(admin.totalBeds),
+                    hospitalName: ipfsData?.hospitalName || admin.hospitalName,
+                    totalHospitals: Number(ipfsData?.totalHospitals || admin.totalHospitals || 0),
+                    totalBeds: Number(ipfsData?.totalBeds || admin.totalBeds || 0),
                     totalAppointments: totalappointments,
                     totalPatients: totalpatients,
                     totalDoctors: totaldoctors,
                     newPatients: newPatients,
                     newDoctors: newDoctors,
                     staffInformation: {
-                        nurses: Number(admin.staffInformation.nurses),
-                        receptionists: Number(admin.staffInformation.receptionists),
-                        otherStaff: Number(admin.staffInformation.otherStaff),
+                        nurses: staffInfo.nurses,
+                        receptionists: staffInfo.receptionists,
+                        otherStaff: staffInfo.otherStaff,
                         totalStaff: totalStaff
                     },
                     latestConfirmedAppointments: formattedConfirmedAppointments,
@@ -228,14 +244,46 @@ module.exports = {
             const limit = 5; // 5 rows per page
             const skip = (page - 1) * limit;
             
-            let query = { status: "confirm" };
-            
-            // First find all confirmed appointments
-            const confirmedAppointments = await appointmentModel.find(query)
+            // First find all appointments
+            const appointments = await appointmentModel.find()
                 .populate('doctorId', 'fullName specialization')
                 .populate('patientId', 'fullName');
             
-            if(!confirmedAppointments || confirmedAppointments.length === 0){
+            if(!appointments || appointments.length === 0){
+                return res.status(404).json({
+                    success: false,
+                    message: "No appointments found"
+                });
+            }
+
+            // Process appointments to get status from IPFS
+            const processedAppointments = await Promise.all(appointments.map(async (appointment) => {
+                let status = 'pending'; // default status
+                
+                // Try to get status from IPFS if available
+                if (appointment.ipfsCID && appointment.ipfsIV) {
+                    try {
+                        const ipfsData = await IPFSService.retrieveAndDecrypt(
+                            appointment.ipfsCID,
+                            appointment.ipfsIV
+                        );
+                        status = ipfsData.status || 'pending';
+                    } catch (error) {
+                        console.error(`Error retrieving IPFS data for appointment ${appointment._id}:`, error);
+                        // Keep default status if IPFS retrieval fails
+                    }
+                }
+
+                return {
+                    ...appointment.toObject(),
+                    status: status
+                };
+            }));
+
+            // Filter confirmed appointments
+            let confirmedAppointments = processedAppointments.filter(app => app.status === "confirm");
+            
+            if(confirmedAppointments.length === 0) {
                 return res.status(404).json({
                     success: false,
                     message: "No confirmed appointments found"
@@ -301,24 +349,54 @@ module.exports = {
     fetchdataPendingAppointments: async (req, res) => {
         try {
             const { search, page = 1 } = req.query;
-            const limit = 5; // 5 rows per page
+            const limit = 10; // 5 rows per page
             const skip = (page - 1) * limit;
             
-            let query = { status: "pending" };
-            
-            // First find all pending appointments
-            const pendingAppointments = await appointmentModel.find(query)
+            // First find all appointments
+            const appointments = await appointmentModel.find()
                 .populate('doctorId', 'fullName specialization')
                 .populate('patientId', 'fullName');
             
-            if(!pendingAppointments || pendingAppointments.length === 0){
+            if(!appointments || appointments.length === 0){
+                return res.status(404).json({
+                    success: false,
+                    message: "No appointments found"
+                });
+            }
+
+            // Process appointments to get status from IPFS
+            const processedAppointments = await Promise.all(appointments.map(async (appointment) => {
+                let status = 'pending'; // default status
+                
+                // Try to get status from IPFS if available
+                if (appointment.ipfsCID && appointment.ipfsIV) {
+                    try {
+                        const ipfsData = await IPFSService.retrieveAndDecrypt(
+                            appointment.ipfsCID,
+                            appointment.ipfsIV
+                        );
+                        status = ipfsData.status || 'pending';
+                    } catch (error) {
+                        console.error(`Error retrieving IPFS data for appointment ${appointment._id}:`, error);
+                        // Keep default status if IPFS retrieval fails
+                    }
+                }
+
+                return {
+                    ...appointment.toObject(),
+                    status: status
+                };
+            }));
+
+            // Filter pending appointments
+            let pendingAppointments = processedAppointments.filter(app => app.status === "pending");
+            
+            if(pendingAppointments.length === 0) {
                 return res.status(404).json({
                     success: false,
                     message: "No pending appointments found"
                 });
             }
-
-            // Filter the results based on search term
             let filteredAppointments = pendingAppointments;
             
             if(search) {
@@ -336,7 +414,6 @@ module.exports = {
                 });
             }
 
-            // Apply pagination
             const totalAppointments = filteredAppointments.length;
             const totalPages = Math.ceil(totalAppointments / limit);
             const paginatedAppointments = filteredAppointments.slice(skip, skip + limit);

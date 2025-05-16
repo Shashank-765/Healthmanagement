@@ -4,16 +4,15 @@ const adminLoginSchema = new mongoose.Schema({
     email:{
         type:String,
         require:true,
-        trim:true,
 
     },
     password:{
         type:String,
-        required:true,
+        // required:true,
     },
     token:{
         type:String,
-        required:true,
+        // required:true,
     }
 },{timestamps:true,
     versionKey: false 

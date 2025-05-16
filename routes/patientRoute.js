@@ -58,4 +58,6 @@ router.get('/patient-dashboard',authenticateToken, patientController.getPatientD
 // router.post('/add-appointment', patientController.addAppointmentToPatient);
 // router.get('/sensitive-data/:cid', patientController.getPatientSensitiveData);
 router.get('/transfer-patient/:email', authenticateToken, patientController.transferPatientByEmail);
+//profile view
+router.get('/profile-view', authenticateToken, patientController.profileview);
 module.exports = router;

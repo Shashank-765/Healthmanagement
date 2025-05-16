@@ -8,7 +8,7 @@ const signupSchema = new Schema({
     },
     phone: {
         type: String,
-        required: [true, 'phoneNumber is required'],
+        // required: [true, 'phoneNumber is required'],
         validate: {
             validator: function(v) {
                 return /^\d{10}$/.test(v);
@@ -31,25 +31,33 @@ const signupSchema = new Schema({
     },
     password: {
         type: String,
-        required: [true, 'password is required'],
+        // required: [true, 'password is required'],
         minlength: [8, 'Password must be at least 8 characters long']
     },
     companyName: {
         type: String,
-        required: [true,'companyName is required'],
+        // required: [true,'companyName is required'],
     },
     role: {
         type: String,
-        required: true
+        // required: true
     },
     image: {
         type: String,
-        required: true
+        // required: true
     },
     createdAt: {
         type: Date,
         default: Date.now
-    }
+    },
+    ipfsCID: { 
+        type: String,
+         required: true
+         },
+    ipfsIV: {
+    type: String,
+    required: true
+ }
 }, {timestamps: true}, { versionKey: false}
 );
 const Signup = mongoose.model("InsuranceSignup", signupSchema);

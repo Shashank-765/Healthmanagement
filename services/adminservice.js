@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const adminSignupModel = require('../models/admin/adminSignupModel');
 const adminLoginModel = require('../models/admin/adminloginModel');
+const IPFSService = require('../services/ipfsService');
 
 const adminSignupService = {
     validateAdminData: async (adminData) => {
@@ -42,10 +43,26 @@ const adminSignupService = {
             // Hash password
             const hashedPassword = await bcrypt.hash(adminData.password, 10);
 
-            // Return validated data
-            return {
-                ...adminData,
+            // Prepare data for IPFS (exclude _id and email)
+            const ipfsData = {
+                fullName: adminData.fullName,
                 password: hashedPassword,
+                contactNumber: adminData.contactNumber,
+                hospitalName: adminData.hospitalName,
+                totalHospitals: adminData.totalHospitals,
+                totalBeds: adminData.totalBeds,
+                staffInformation: adminData.staffInformation,
+                role: adminData.role
+            };
+
+            // Store on IPFS
+            const { cid, iv } = await IPFSService.uploadEncryptedData(ipfsData);
+
+            // Return only email, ipfsCID, ipfsIV
+            return {
+                email: adminData.email,
+                ipfsCID: cid,
+                ipfsIV: iv
             };
         } catch (error) {
             throw error;
@@ -54,21 +71,11 @@ const adminSignupService = {
 
     createAdmin: async (validatedData) => {
         try {
-            // Create new admin
+            // Create new admin with only email, ipfsCID, ipfsIV
             const newAdmin = new adminSignupModel({
-                fullName: validatedData.fullName,
                 email: validatedData.email,
-                password: validatedData.password,
-                contactNumber: validatedData.contactNumber,
-                hospitalName: validatedData.hospitalName,
-                totalHospitals: validatedData.totalHospitals,
-                totalBeds: validatedData.totalBeds,
-                staffInformation: {
-                    nurses: validatedData.staffInformation.nurses,
-                    receptionists: validatedData.staffInformation.receptionists,
-                    otherStaff: validatedData.staffInformation.otherStaff
-                },
-                role: validatedData.role
+                ipfsCID: validatedData.ipfsCID,
+                ipfsIV: validatedData.ipfsIV
             });
 
             // Save admin
@@ -87,19 +94,25 @@ const adminLoginService = {
             if (!email || !password) {
                 throw new Error("Email and password are required");
             }
-
+    
             // Find admin by email
             const admin = await adminSignupModel.findOne({ email });
             if (!admin) {
                 throw new Error("Invalid email or password");
             }
-
+    
+            // Get sensitive data from IPFS
+            const adminData = await IPFSService.retrieveAndDecrypt(
+                admin.ipfsCID,
+                admin.ipfsIV
+            );
+    
             // Verify password
-            const isPasswordValid = await bcrypt.compare(password, admin.password);
+            const isPasswordValid = await bcrypt.compare(password, adminData.password);
             if (!isPasswordValid) {
                 throw new Error("Invalid email or password");
             }
-
+    
             // Generate JWT token
             const token = jwt.sign(
                 { 
@@ -109,23 +122,24 @@ const adminLoginService = {
                 process.env.JWT_SECRET,
                 { expiresIn: '30d' }
             );
-
+    
             // Save login information
             const loginData = {
                 email: admin.email,
-                password: admin.password,
+                password: adminData.password,
                 token
             };
-
+    
             // Update or create login record
             await adminLoginModel.findOneAndUpdate(
                 { email: admin.email },
                 loginData,
                 { upsert: true, new: true }
             );
-
+    
             return {
                 admin,
+                adminData,
                 token
             };
         } catch (error) {

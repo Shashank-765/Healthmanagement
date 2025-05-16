@@ -532,12 +532,6 @@ const patientService = {
             const recentAppointments = await Promise.all(
                 appointments.slice(0, 4).map(async (app, index) => {
                     try {
-                        console.log(`Processing appointment ${index + 1}:`, {
-                            id: app._id,
-                            hasCID: !!app.ipfsCID,
-                            hasIV: !!app.ipfsIV,
-                            cid: app.ipfsCID
-                        });
 
                         // Check if IPFS data exists
                         if (!app.ipfsCID || !app.ipfsIV) {

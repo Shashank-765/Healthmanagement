@@ -490,6 +490,149 @@ module.exports = {
                 message: error.message || "Internal server error"
             });
         }
+    },
+    profileview: async (req, res) => {
+        try {
+            console.log('Profile View Request - User Data:', req.user);
+            const { role, id } = req.user;
+            let userData;
+            let ipfsData;
+
+            if (!id) {
+                console.error('No user ID found in request');
+                return res.status(401).json({
+                    success: false,
+                    message: "User ID not found in request"
+                });
+            }
+
+            if (role === 'patient') {
+                // Fetch patient data
+                console.log('Fetching patient data for ID:', id);
+                userData = await patientSignup.findById(id);
+                
+                if (!userData) {
+                    console.log('Patient not found in patientSignup, trying addpatientModel');
+                    userData = await addpatientModel.findById(id);
+                }
+
+                if (!userData) {
+                    console.error('Patient not found in both collections');
+                    return res.status(404).json({
+                        success: false,
+                        message: "Patient not found"
+                    });
+                }
+
+                console.log('Found patient data:', userData);
+
+                // Fetch IPFS data if CID exists
+                if (userData.ipfsCID) {
+                    try {
+                        console.log('Fetching IPFS data for CID:', userData.ipfsCID);
+                        ipfsData = await IPFSService.retrieveAndDecrypt(userData.ipfsCID, userData.ipfsIV);
+                        console.log('IPFS data fetched:', ipfsData);
+                    } catch (ipfsError) {
+                        console.error('Error fetching IPFS data:', ipfsError);
+                        // Continue without IPFS data
+                        ipfsData = null;
+                    }
+                }
+
+                // Get contact number from either model or IPFS data
+                const contactNumber = userData.phoneNumber || 
+                                    userData.contactNumber || 
+                                    ipfsData?.contactNumber || 
+                                    ipfsData?.phoneNumber;
+
+                // Get date of birth from either model or IPFS data
+                const dateOfBirth = userData.dateOfBirth || ipfsData?.dateOfBirth;
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Patient profile data fetched successfully",
+                    data: {
+                        fullName: userData.fullName,
+                        age: dateOfBirth ? calculateAge(dateOfBirth) : null,
+                        contact: contactNumber,
+                        email: userData.email,
+                        bloodGroup: ipfsData?.bloodGroup || null
+                    }
+                });
+            } else if (role === 'doctor') {
+                // Fetch doctor data
+                console.log('Fetching doctor data for ID:', id);
+                userData = await doctorSignup.findById(id);
+                
+                if (!userData) {
+                    console.error('Doctor not found');
+                    return res.status(404).json({
+                        success: false,
+                        message: "Doctor not found"
+                    });
+                }
+
+                console.log('Found doctor data:', userData);
+
+                // Fetch IPFS data if CID exists
+                if (userData.ipfsCID) {
+                    try {
+                        console.log('Fetching IPFS data for CID:', userData.ipfsCID);
+                        ipfsData = await IPFSService.retrieveAndDecrypt(userData.ipfsCID, userData.ipfsIV);
+                        console.log('IPFS data fetched:', ipfsData);
+                    } catch (ipfsError) {
+                        console.error('Error fetching IPFS data:', ipfsError);
+                        // Continue without IPFS data
+                        ipfsData = null;
+                    }
+                }
+
+                // Get contact number from either model or IPFS data
+                const contactNumber = userData.phoneNumber || 
+                                    userData.contactNumber || 
+                                    ipfsData?.contactNumber || 
+                                    ipfsData?.phoneNumber;
+
+                // Get date of birth from either model or IPFS data
+                const dateOfBirth = userData.dateOfBirth || ipfsData?.dateOfBirth;
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Doctor profile data fetched successfully",
+                    data: {
+                        fullName: userData.fullName,
+                        age: dateOfBirth ? calculateAge(dateOfBirth) : null,
+                        contact: contactNumber,
+                        email: userData.email,
+                        specialization: userData.specialization
+                    }
+                });
+            } else {
+                console.error('Invalid role:', role);
+                return res.status(403).json({
+                    success: false,
+                    message: "Invalid role"
+                });
+            }
+        } catch (error) {
+            console.error("Error in profileview:", error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    }
+};
+ 
+function calculateAge(dateOfBirth) {
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
     }
     
-};
+    return age;
+}

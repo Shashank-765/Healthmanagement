@@ -16,7 +16,7 @@ router.post('/transfer-patient-signup',adminController.transferPatientSignup);
 // Insurance access request routes
 router.get('/insurance-access-requests', authenticateToken, adminController.getInsuranceAccessRequests);
 router.post('/handle-insurance-request', authenticateToken, adminController.handleInsuranceRequest);
-router.get('/processed-insurance-requests', authenticateToken, adminController.getProcessedAccessRequests);
+// router.get('/processed-insurance-requests', authenticateToken, adminController.getProcessedAccessRequests);
 
 // Patient history routes
 router.get('/patients', authenticateToken, adminController.getAllPatientsforAdmin);

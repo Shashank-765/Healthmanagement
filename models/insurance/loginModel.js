@@ -8,11 +8,11 @@ const loginSchema = new Schema({
     },
     password: {
         type: String,
-        required: true
+        // required: true
     },
     token: { 
         type: String, 
-        required: true 
+        // required: true 
     },
     loginTime: {
         type: Date,
@@ -21,7 +21,7 @@ const loginSchema = new Schema({
     userId: {
         type: Schema.Types.ObjectId,
         ref: 'Signup',
-        required: true
+        // required: true
     }
 });
 

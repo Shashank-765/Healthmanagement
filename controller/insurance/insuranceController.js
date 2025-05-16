@@ -31,22 +31,40 @@ module.exports = {
             if (password.length < 8) {
                 return res.status(400).json({ message: "Password must be at least 8 characters long" });
             }
+
+            // Hash password
             const hashedPassword = await bcrypt.hash(password, 10);
 
-            const newUser = new Signup({
-                name,
+            // Prepare data for IPFS
+            const ipfsData = {
                 phone,
-                email,
                 password: hashedPassword,
                 companyName,
                 role,
-                image,
+                image
+            };
+
+            // Store sensitive data in IPFS
+           const { cid, iv } = await IPFSService.uploadEncryptedData(ipfsData);
+            // Create new user with minimal data in MongoDB
+            const newUser = new Signup({
+                name,
+                email,
+                ipfsCID: cid,
+                ipfsIV: iv
             });
 
             // Save user data in Signup model
-            await newUser.save(); // Mongoose validation will run here
+            await newUser.save();
 
-            res.status(201).json({ message: "Insurance registered successfully", Data: newUser });
+            res.status(201).json({ 
+                message: "Insurance registered successfully", 
+                data: {
+                    _id: newUser._id,
+                    name: newUser.name,
+                    email: newUser.email
+                }
+            });
         } catch (error) {
             console.error(error);
 
@@ -63,74 +81,76 @@ module.exports = {
             res.status(500).json({ message: "Server error" });
         }
     },
-  insuranceLogin: async (req, res) => {
-    const { email, password } = req.body;
-    try {
-        // Find user in Signup collection
-        const user = await Signup.findOne({ email });
-        if (!user) {
-            return res.status(401).json({ message: "Invalid email or password" });
-        }
-
-        // Validate input
-        if (!email || !password) {
-            return res.status(400).json({ message: "Email and password are required" });
-        }
-
-        // Compare passwords
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ message: "Invalid email or password" });
-        }
-
-        // Generate JWT token with role
-        const token = jwt.sign(
-            { 
-                id: user._id,
-                role: 'insurance', // Add role to token
-                email: user.email
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        // Create or update login record
-        const loginData = {
-            email: user.email,
-            password: user.password,
-            token: token,
-            userId: user._id
-        };
-
-        const existingLogin = await Login.findOne({ email: user.email });
-
-        if (existingLogin) {
-            // Update existing login record
-            existingLogin.token = token;
-            existingLogin.loginTime = new Date();
-            await existingLogin.save();
-        } else {
-            // Create new login record
-            const newLogin = new Login(loginData);
-            await newLogin.save();
-        }
-
-        // Send success response
-        res.status(200).json({ 
-            message: "Login successful", 
-            token, 
-            user: {
-                _id: user._id,
-                email: user.email,
-                name: user.name,
-                companyName: user.companyName,
-                role: 'insurance' 
+    insuranceLogin: async (req, res) => {
+        const { email, password } = req.body;
+        try {
+            // Find user in Signup collection
+            const user = await Signup.findOne({ email });
+            if (!user) {
+                return res.status(401).json({ message: "Invalid email or password" });
             }
-        });
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ message: "Server error: " + error.message });
-    }
+
+            // Validate input
+            if (!email || !password) {
+                return res.status(400).json({ message: "Email and password are required" });
+            }
+
+            // Get user data from IPFS
+            const ipfsData = await IPFSService.retrieveAndDecrypt(user.ipfsCID, user.ipfsIV);
+            
+            // Compare passwords
+            const isMatch = await bcrypt.compare(password, ipfsData.password);
+            if (!isMatch) {
+                return res.status(401).json({ message: "Invalid email or password" });
+            }
+
+            // Generate JWT token with role
+            const token = jwt.sign(
+                { 
+                    id: user._id,
+                    role: 'insurance',
+                    email: user.email
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+
+            // Create or update login record (only store email and token)
+            const loginData = {
+                email: user.email,
+                token: token,
+                userId: user._id
+            };
+
+            const existingLogin = await Login.findOne({ email: user.email });
+
+            if (existingLogin) {
+                // Update existing login record
+                existingLogin.token = token;
+                existingLogin.loginTime = new Date();
+                await existingLogin.save();
+            } else {
+                // Create new login record
+                const newLogin = new Login(loginData);
+                await newLogin.save();
+            }
+
+            // Send success response
+            res.status(200).json({ 
+                message: "Login successful", 
+                token, 
+                user: {
+                    _id: user._id,
+                    email: user.email,
+                    name: user.name,
+                    companyName: ipfsData.companyName,
+                    role: 'insurance' 
+                }
+            });
+        } catch (error) {
+            console.error('Login error:', error);
+            res.status(500).json({ message: "Server error: " + error.message });
+        }
     },
     getPatientsWithMedicalHistory: async (req, res) => {
         try {
