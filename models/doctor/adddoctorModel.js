@@ -58,11 +58,11 @@ const adddoctorSchema = new mongoose.Schema({
     },
     ipfsCID: {
         type: String,
-        required:true
+        // required:true
     },
     ipfsIV: {
         type: String,
-        required:true
+        // required:true
     },
     email: {
         type: String,

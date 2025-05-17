@@ -509,12 +509,11 @@ module.exports = {
 
     readDoctorsByEmail: async (req, res) => {
         try {
-          const { email } = req.params;
+            const { email } = req.params;
 
             // First check in signup collection
-            const signupDoctor = await doctorSignup.findOne({ email });
+            const signupDoctor = await doctorSignup.findOne({ email }); 
             const existingAddDoctor = await adddoctorModel.findOne({ email });
-
             if (!signupDoctor) {
                 return res.status(404).json({
                     success: false,
@@ -522,53 +521,92 @@ module.exports = {
                 });
             }
 
-            // If doctor already exists in adddoctorModel, return existing data
+            // Get specialization from IPFS
+            let specialization = 'Not Available';
+            if (signupDoctor.ipfsCID && signupDoctor.ipfsIV) {
+                console.log('IPFS CID and IV found:', {
+                    ipfsCID: signupDoctor.ipfsCID,
+                    ipfsIV: signupDoctor.ipfsIV
+                });
+                
+                try {
+                    console.log('Attempting to retrieve IPFS data...');
+                    const ipfsResponse = await IPFSService.retrieveAndDecrypt(
+                        signupDoctor.ipfsCID,
+                        signupDoctor.ipfsIV
+                    ); 
+                    // Get specialization from either direct response or sensitiveData
+                    const ipfsSpecialization = ipfsResponse.sensitiveData?.specialization || ipfsResponse.specialization;       
+                    // Use the exact specialization from IPFS if it matches enum values
+                    if (ipfsSpecialization) {
+                        const validSpecializations = [
+                            'Cardiologist',
+                            'Neurologist',
+                            'Dermatologist',
+                            'General Medicine',
+                            'Orthopedics'
+                        ];
+                          
+                        // Check if the IPFS specialization exactly matches any valid specialization
+                        if (validSpecializations.includes(ipfsSpecialization)) {
+                            specialization = ipfsSpecialization;
+                            console.log('Specialization matched:', specialization);
+                        } else {
+                            console.log(`Invalid specialization from IPFS: ${ipfsSpecialization}`);
+                            console.log('Specialization comparison:', {
+                                fromIPFS: ipfsSpecialization,
+                                validValues: validSpecializations,
+                                exactMatch: validSpecializations.includes(ipfsSpecialization)
+                            });
+                        }
+                    } else {
+                        console.log('No specialization found in IPFS data');
+                        console.log('IPFS response structure:', JSON.stringify(ipfsResponse, null, 2));
+                    }
+                } catch (ipfsError) {
+                    console.error(`Error retrieving IPFS data for doctor ${signupDoctor._id}:`, ipfsError);
+                    console.error('Error details:', {
+                        message: ipfsError.message,
+                        stack: ipfsError.stack
+                    });
+                }
+            } else {
+                console.log('No IPFS CID or IV found for doctor');
+                console.log('Signup doctor data:', JSON.stringify(signupDoctor, null, 2));
+            }
+            // If doctor already exists, update it
             if (existingAddDoctor) {
+                    const updatedDoctor = await adddoctorModel.findOneAndUpdate(
+                    { email: email },
+                    { 
+                        specialization: specialization,
+                        ipfsCID: signupDoctor.ipfsCID || existingAddDoctor.ipfsCID,
+                        ipfsIV: signupDoctor.ipfsIV || existingAddDoctor.ipfsIV
+                    },
+                    { new: true }
+                );
+                
                 return res.status(200).json({
                     success: true,
-                    message: "Doctor already exists in adddoctor collection",
-                    data: existingAddDoctor
+                    message: "Doctor data updated successfully",
+                    data: updatedDoctor
                 });
             }
 
-            // Get sensitive data from IPFS
-            let sensitiveData = {};
-            if (signupDoctor.ipfsCID && signupDoctor.ipfsIV) {
-                try {
-                    sensitiveData = await IPFSService.retrieveAndDecrypt(
-                        signupDoctor.ipfsCID,
-                        signupDoctor.ipfsIV
-                    );
-                } catch (error) {
-                    console.error('Error retrieving IPFS data:', error);
-                }
-            }
-
-            // Create new doctor document with data from both signup and IPFS
+            // Create new doctor document
             const newDoctor = {
-                UUID: signupDoctor._id,
+                _id: signupDoctor._id,
                 doctorId: signupDoctor._id,
                 fullName: signupDoctor.fullName,
                 email: signupDoctor.email,
-                // Extract these important fields from IPFS data and store in main document
-                specialization: sensitiveData.specialization || "NA",
-                experience: sensitiveData.yearsOfExperience || 0,
-                contactnumber: sensitiveData.contactNumber || "",
-                // Set default values for other required fields
-                availability: "Available",
-                qualification: sensitiveData.qualification || "MBBS",
-                address: sensitiveData.address || "Not provided",
-                bio: "",
-                profileimage: "",
-                ipfsCID: signupDoctor.ipfsCID,
-                ipfsIV: signupDoctor.ipfsIV,
+                specialization: specialization,
+                ipfsCID: signupDoctor.ipfsCID || null,
+                ipfsIV: signupDoctor.ipfsIV || null,
                 patients: [],
                 appointments: []
             };
-
             // Save to adddoctorModel
             const savedDoctor = await adddoctorModel.create(newDoctor);
-
             return res.status(200).json({
                 success: true,
                 message: "Doctor data transferred successfully",
@@ -576,7 +614,10 @@ module.exports = {
             });
 
         } catch (error) {
-            console.error('Error in readDoctorsByEmail:', error);
+                console.error('Error details:', {
+                message: error.message,
+                stack: error.stack
+            });
             return res.status(500).json({
                 success: false,
                 message: error.message || "Internal server error"
