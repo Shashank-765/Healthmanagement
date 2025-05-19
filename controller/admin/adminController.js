@@ -577,9 +577,6 @@ module.exports = {
     handleInsuranceRequest: async (req, res) => {
         try {
             const { requestId, action } = req.body;
-
-            console.log("handleInsuranceRequest req.body:", req.body);
-
             // Validate required fields
             if (!requestId) {
                 return res.status(400).json({
@@ -815,7 +812,6 @@ module.exports = {
             // Find patient by name
             const patient = await AddPatient.findOne({ fullName: patientName });
             if (!patient) {
-                console.log('Patient not found:', patientName);
                 return res.status(404).json({
                     success: false,
                     message: "Patient not found"
@@ -1032,7 +1028,6 @@ module.exports = {
                 })
                 .sort({ createdAt: -1 });
             
-            // Get stats for dashboard
             const totalMedicalHistory = await MedicalHistory.countDocuments();
             const totalInsurancePatients = await InsurancePatient.countDocuments({ hasAccess: true });
             
@@ -1040,8 +1035,6 @@ module.exports = {
             const formattedPatients = await Promise.all(patients.map(async patient => {
                 // Get contact number from multiple sources
                 let contactNumber = patient.phone || 'Not Available';
-                
-                // Try to get contact number from MongoDB first via patientId
                 if (patient.patientId && patient.patientId.contactnumber) {
                     contactNumber = patient.patientId.contactnumber;
                 } 

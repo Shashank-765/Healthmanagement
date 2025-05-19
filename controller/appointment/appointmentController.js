@@ -7,11 +7,9 @@ const mongoose = require('mongoose');
 const appointmentController = {
     createAppointment: async (req, res) => {
         try {
-            console.log('Received appointment data:', req.body);
             const { department, doctorId, appointmentDate, appointmentTime, reason } = req.body;
-            const patientEmail = req.user.email.toLowerCase();
-            
-            // Get patient ID from email
+            const patientEmail = req.user.email.toLowerCase();  
+
             const patient = await addpatientModel.findOne({ email: patientEmail });
             if (!patient) {
                 return res.status(404).json({
@@ -239,7 +237,7 @@ const appointmentController = {
             
             // For other users (patients), get only basic details
             const doctors = await adddoctorModel.find()
-                .select('fullName specialization _id');  // Only select required fields
+                .select('fullName specialization _id');
 
             return res.status(200).json({
                 success: true,
@@ -385,14 +383,6 @@ const appointmentController = {
                 reason 
             } = req.body;
 
-            console.log('Received cancel request:', {
-                patientId,
-                doctorId,
-                appointmentDate,
-                appointmentTime,
-                department
-            });
-
             // Validate required fields
             if (!patientId || !doctorId || !department || !appointmentDate || !appointmentTime || !reason) {
                 return res.status(400).json({
@@ -406,16 +396,6 @@ const appointmentController = {
             startDate.setHours(0, 0, 0, 0);
             const endDate = new Date(appointmentDate);
             endDate.setHours(23, 59, 59, 999);
-
-            console.log('Searching for appointment with:', {
-                patientId,
-                doctorId,
-                dateRange: {
-                    start: startDate,
-                    end: endDate
-                },
-                appointmentTime
-            });
 
             // Find the appointment
             const appointment = await appointmentModel.findOne({
@@ -492,7 +472,8 @@ const appointmentController = {
                     console.log(`Processing appointment ${index + 1}:`, {
                         id: appointment._id,
                         cid: appointment.ipfsCID,
-                        hasIV: !!appointment.ipfsIV
+                        hasIV: !!appointment.ipfsIV,
+                        mongoStatus: appointment.status // Log MongoDB status
                     });
 
                     // Check if IPFS data exists
@@ -506,7 +487,7 @@ const appointmentController = {
                             appointmentTime: 'No IPFS data',
                             department: 'N/A',
                             reason: 'N/A',
-                            status: appointment.status || 'pending',
+                            status: appointment.status, // Use MongoDB status
                             createdAt: appointment.createdAt,
                             updatedAt: appointment.updatedAt,
                             error: 'Missing IPFS CID or IV'
@@ -522,7 +503,8 @@ const appointmentController = {
                     console.log(`Successfully retrieved IPFS data for appointment ${appointment._id}:`, {
                         date: sensitiveData.appointmentDate,
                         time: sensitiveData.appointmentTime,
-                        status: sensitiveData.status
+                        ipfsStatus: sensitiveData.status,
+                        mongoStatus: appointment.status
                     });
 
                     return {
@@ -533,7 +515,7 @@ const appointmentController = {
                         appointmentTime: sensitiveData.appointmentTime,
                         department: sensitiveData.department,
                         reason: sensitiveData.reason,
-                        status: sensitiveData.status,
+                        status: appointment.status || sensitiveData.status, // Use MongoDB status first, fallback to IPFS
                         createdAt: appointment.createdAt,
                         updatedAt: appointment.updatedAt
                     };
@@ -547,7 +529,7 @@ const appointmentController = {
                         appointmentTime: 'IPFS Error',
                         department: 'N/A',
                         reason: 'N/A',
-                        status: appointment.status || 'pending',
+                        status: appointment.status, // Use MongoDB status on error
                         createdAt: appointment.createdAt,
                         updatedAt: appointment.updatedAt,
                         error: `IPFS retrieval failed: ${error.message}`

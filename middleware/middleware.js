@@ -34,10 +34,7 @@ const authMiddleware = {
             }
 
             // Verify token
-            console.log('Verifying token...');
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            console.log('Decoded token:', decoded);
-
             if (!decoded.role) {
                 console.error("Token missing role:", decoded);
                 return res.status(401).json({
@@ -49,8 +46,6 @@ const authMiddleware = {
 
             // Find user based on role
             let user;
-            console.log('Finding user with role:', decoded.role, 'and id:', decoded.id);
-            
             switch (decoded.role) {
                 case 'admin':
                     user = await adminSignupModel.findById(decoded.id);

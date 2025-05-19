@@ -151,7 +151,7 @@ const patientLoginService = {
             const token = jwt.sign(
                 { id: hospitalPatient ? hospitalPatient._id : patient._id, role: 'patient' },
                 process.env.JWT_SECRET,
-                { expiresIn: '30d' }
+                { expiresIn: '2d' }
             );
 
             return {

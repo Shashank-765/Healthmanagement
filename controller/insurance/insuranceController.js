@@ -167,8 +167,12 @@ module.exports = {
             const uniquePatientsMap = new Map();
             for (const patient of patients) {
                 const key = patient.patientId ? patient.patientId._id.toString() : patient._id.toString();
-                // Always keep the latest record (so verify/update reflects)
-                uniquePatientsMap.set(key, patient);
+                
+                // If this patient is not in the map yet, or if this record is verified and the existing one isn't
+                if (!uniquePatientsMap.has(key) || 
+                    (patient.isVerified && !uniquePatientsMap.get(key).isVerified)) {
+                    uniquePatientsMap.set(key, patient);
+                }
             }
             const uniquePatients = Array.from(uniquePatientsMap.values());
 
@@ -189,11 +193,11 @@ module.exports = {
                             patient.patientId.ipfsIV
                         );
                         
-                         contactNumber = ipfsData.contactNumber || 
-                                     ipfsData.phoneNumber || 
-                                     ipfsData.contactnumber || 
-                                     ipfsData.phone ||
-                                     contactNumber;
+                        contactNumber = ipfsData.contactNumber || 
+                                    ipfsData.phoneNumber || 
+                                    ipfsData.contactnumber || 
+                                    ipfsData.phone ||
+                                    contactNumber;
                     } catch (error) {
                         console.error(`Error retrieving IPFS data for patient:`, error);
                         // Keep the original contact number if IPFS fails
@@ -205,8 +209,8 @@ module.exports = {
                     name: patient.name || (patient.patientId ? patient.patientId.fullName : 'Unknown'),
                     email: patient.email || (patient.patientId ? patient.patientId.email : 'No email provided'),
                     phone: contactNumber,
-                    isVerified: patient.isVerified || false,
-                    hasAccess: patient.hasAccess || false,
+                    isVerified: Boolean(patient.isVerified),
+                    hasAccess: Boolean(patient.hasAccess),
                     requestPending: patient.accessRequest && patient.accessRequest.status === 'pending'
                 };
 
@@ -343,12 +347,22 @@ module.exports = {
             insurancePatient.isVerified = true;
             await insurancePatient.save();
 
+            // Log the verification
+            console.log(`Patient ${patientName} verified successfully. ID: ${insurancePatient._id}, isVerified: ${insurancePatient.isVerified}`);
+
+            // Fetch the updated patient data to ensure we're sending the correct state
+            const updatedPatient = await InsurancePatient.findById(insurancePatient._id);
+            console.log('Updated patient data:', updatedPatient);
+
             res.status(200).json({
                 success: true,
                 message: "Patient verified successfully",
                 data: {
                     patientName: patient.fullName,
-                    isVerified: true
+                    isVerified: true,
+                    patientId: insurancePatient._id,
+                    _id: insurancePatient._id,
+                    hasAccess: insurancePatient.hasAccess
                 }
             });
         } catch (error) {

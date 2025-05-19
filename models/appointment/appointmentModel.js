@@ -13,7 +13,7 @@ const appointmentSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'confirm'],
+        enum: ['pending', 'confirm', 'cancelled'],
         default: 'pending'
     },
     ipfsCID: {
