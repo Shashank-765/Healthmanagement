@@ -354,31 +354,60 @@ module.exports = {
                 })
                 .sort({ date: -1 });
 
-            console.log('Step 2: Retrieved medical history');
+            console.log('Retrieved medical history records:', medicalHistory.length);
+
+            // Validate and prepare medical history data
+            const validatedMedicalHistory = medicalHistory.map(record => {
+                try {
+                    console.log('Processing record:', record._id);
+                    
+                    // Safely extract doctor information
+                    let doctorId = null;
+                    let doctorName = 'Unknown Doctor';
+                    
+                    if (record.doctorId && typeof record.doctorId === 'object') {
+                        doctorId = record.doctorId._id || null;
+                        doctorName = record.doctorId.fullName || 'Unknown Doctor';
+                    }
+
+                    // Create validated record with safe defaults
+                    return {
+                        condition: record.condition || 'No condition specified',
+                        notes: record.notes || 'No notes available',
+                        date: record.date || new Date(),
+                        doctorId: doctorId,
+                        doctorName: doctorName
+                    };
+                } catch (error) {
+                    console.error('Error processing medical history record:', error);
+                    // Return a safe default record if processing fails
+                    return {
+                        condition: 'Error processing record',
+                        notes: 'Failed to process medical history record',
+                        date: new Date(),
+                        doctorId: null,
+                        doctorName: 'Unknown Doctor'
+                    };
+                }
+            });
 
             // Prepare data for IPFS storage
             const ipfsData = {
                 patientId: patient._id,
                 name: patient.fullName,
-                email: patient.email,
-                phone: patient.contactnumber,
+                email: patient.email || 'No email provided',
+                phone: patient.contactnumber || 'No phone provided',
                 isVerified: true,
                 hasAccess: true,
-                accessRequest: {
-                    insuranceId: insurancePatient.accessRequest.insuranceId,
-                    insuranceName: insurancePatient.accessRequest.insuranceName,
-                    status: insurancePatient.accessRequest.status,
-                    requestDate: insurancePatient.accessRequest.requestDate,
-                    approvalDate: insurancePatient.accessRequest.approvalDate,
-                    approvedBy: insurancePatient.accessRequest.approvedBy
-                },
-                medicalHistory: medicalHistory.map(record => ({
-                    condition: record.condition,
-                    notes: record.notes,
-                    date: record.date,
-                    doctorId: record.doctorId._id,
-                    doctorName: record.doctorId.fullName
-                }))
+                accessRequest: insurancePatient.accessRequest ? {
+                    insuranceId: insurancePatient.accessRequest.insuranceId || null,
+                    insuranceName: insurancePatient.accessRequest.insuranceName || 'Unknown Insurance',
+                    status: insurancePatient.accessRequest.status || 'unknown',
+                    requestDate: insurancePatient.accessRequest.requestDate || new Date(),
+                    approvalDate: insurancePatient.accessRequest.approvalDate || new Date(),
+                    approvedBy: insurancePatient.accessRequest.approvedBy || null
+                } : null,
+                medicalHistory: validatedMedicalHistory
             };
 
             console.log('Step 3: Prepared IPFS data:', JSON.stringify(ipfsData, null, 2));
@@ -402,14 +431,14 @@ module.exports = {
             await insurancePatient.save();
                 console.log('Step 7: Insurance patient updated successfully');
 
-            res.status(200).json({
-                success: true,
-                message: "Patient verified successfully",
-                data: {
-                    patientName: patient.fullName,
-                    isVerified: true,
-                    patientId: insurancePatient._id,
-                    _id: insurancePatient._id,
+                res.status(200).json({
+                    success: true,
+                    message: "Patient verified successfully",
+                    data: {
+                        patientName: patient.fullName,
+                        isVerified: true,
+                        patientId: insurancePatient._id,
+                        _id: insurancePatient._id,
                         hasAccess: insurancePatient.hasAccess,
                         ipfsCID: cid,
                         ipfsIV: iv

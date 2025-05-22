@@ -62,9 +62,7 @@ const mongoose = require("mongoose");
 
 const addpatientSchema = new mongoose.Schema({
     patientId: {
-        type: mongoose.Schema.Types.ObjectId,
-        // required: true,
-        index: true
+        type: mongoose.Schema.Types.ObjectId
     },
     fullName: {
         type: String,
@@ -107,23 +105,4 @@ addpatientSchema.pre('save', function(next) {
 });
 
 const AddPatient = mongoose.model("AddPatient", addpatientSchema);
-
-// Function to drop existing indexes and recreate them
-const recreateIndexes = async () => {
-    try {
-        // Drop all existing indexes
-        await AddPatient.collection.dropIndexes();
-        
-        // Create new indexes
-        await AddPatient.createIndexes();
-        
-        console.log('Indexes recreated successfully');
-    } catch (error) {
-        console.error('Error recreating indexes:', error);
-    }
-};
-
-// Call the function to recreate indexes
-recreateIndexes();
-
 module.exports = AddPatient;
