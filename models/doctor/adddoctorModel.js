@@ -6,12 +6,10 @@ const adddoctorSchema = new mongoose.Schema({
         index: true
     },
     fullName: {
-        type: String,
-        // required: true
+        type: String
     },
     specialization: {
         type: String,
-        // required: [true, 'Specialization is required'],
         enum: [
             'Cardiologist',
             'Neurologist',
@@ -20,49 +18,11 @@ const adddoctorSchema = new mongoose.Schema({
             'Orthopedics'
         ]
     },
-    department: {
+    ipfsCID: {
         type: String
     },
-    experience:{
-        type:Number,
-        // required:true
-    },
-    availability:{
-        type:String,
-        // required:true
-    },
-    contactnumber: {
-        type: String,
-        // required: [true, 'phoneNumber is required'],
-        validate: {
-            validator: function(v) {
-                return /^\d{10}$/.test(v);
-            },
-            message: props => `${props.value} is not a valid 10-digit phone number!`
-        }
-    },
-    qualification:{
-        type:String,
-        // required:true
-    },
-    address:{
-        type:String,
-        // required:true
-    },
-    bio:{
-        type:String,
-    },  
-    profileimage:{
-        type:String,
-        // required:true
-    },
-    ipfsCID: {
-        type: String,
-        // required:true
-    },
     ipfsIV: {
-        type: String,
-        // required:true
+        type: String
     },
     email: {
         type: String,
@@ -90,7 +50,7 @@ const adddoctorSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     }
-}, { timestamps: true },{versionKey:false});
+}, { timestamps: true, versionKey: false });
 
 // Add pre-save middleware to ensure doctorId is set
 adddoctorSchema.pre('save', function(next) {
@@ -105,21 +65,6 @@ adddoctorSchema.pre('save', function(next) {
     this.email = this.email.toLowerCase();
     next();
 });
-
-// Enhanced methods to manage appointments and patients
-adddoctorSchema.methods.addPatient = async function(patientId) {
-    if (!this.patients.includes(patientId)) {
-        this.patients.push(patientId);
-        await this.save();
-    }
-};
-
-adddoctorSchema.methods.addAppointment = async function(appointmentId) {
-    if (!this.appointments.includes(appointmentId)) {
-        this.appointments.push(appointmentId);
-        await this.save();
-    }
-};
 
 const adddoctor = mongoose.model("adddoctor", adddoctorSchema);
 module.exports = adddoctor;

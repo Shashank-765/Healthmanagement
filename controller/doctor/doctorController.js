@@ -547,24 +547,25 @@ module.exports = {
                 }
             }
 
-            // If doctor already exists, update only required fields
+            // If doctor already exists, update only minimal fields
             if (existingAddDoctor) {
+                console.log("=== EXISTING DOCTOR FOUND ===");
+                console.log("signupDoctor:", signupDoctor);
+                console.log("existingAddDoctor:", existingAddDoctor);
+
+                const updateObj = {
+                    doctorId: signupDoctor._id,
+                    fullName: signupDoctor.fullName,
+                    specialization: specialization,
+                    ipfsCID: signupDoctor.ipfsCID || existingAddDoctor.ipfsCID,
+                    ipfsIV: signupDoctor.ipfsIV || existingAddDoctor.ipfsIV,
+                    email: signupDoctor.email,
+                    updatedAt: new Date()
+                };
+
                 const updatedDoctor = await adddoctorModel.findOneAndUpdate(
                     { email: email },
-                    { 
-                        _id: signupDoctor._id,
-                        doctorId: signupDoctor._id,
-                        fullName: signupDoctor.fullName,
-                        specialization: specialization,
-                        ipfsCID: signupDoctor.ipfsCID || existingAddDoctor.ipfsCID,
-                        ipfsIV: signupDoctor.ipfsIV || existingAddDoctor.ipfsIV,
-                        email: signupDoctor.email,
-                        patients: [],
-                        appointments: [],
-                        lastLoginAt: new Date(),
-                        createdAt: existingAddDoctor.createdAt,
-                        updatedAt: new Date()
-                    },
+                    updateObj,
                     { new: true }
                 );
                 
@@ -583,15 +584,9 @@ module.exports = {
                 specialization: specialization,
                 ipfsCID: signupDoctor.ipfsCID || null,
                 ipfsIV: signupDoctor.ipfsIV || null,
-                email: signupDoctor.email,
-                patients: [],
-                appointments: [],
-                lastLoginAt: new Date(),
-                createdAt: new Date(),
-                updatedAt: new Date()
+                email: signupDoctor.email
             };
 
-            // Save to adddoctorModel
             const savedDoctor = await adddoctorModel.create(newDoctor);
             return res.status(200).json({
                 success: true,

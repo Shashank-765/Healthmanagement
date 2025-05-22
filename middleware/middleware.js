@@ -17,7 +17,7 @@ const authMiddleware = {
 
             if (authHeader) {
                 token = authHeader.split(' ')[1];
-                console.log('Token from Authorization header:', token);
+                // console.log('Token from Authorization header:', token);
             } else {
                 // Check for token in cookies
                 token = req.cookies?.token;

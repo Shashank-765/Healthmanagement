@@ -9,7 +9,7 @@ const medicalHistorySchema = new mongoose.Schema({
     doctorId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'adddoctor',
-        required: true
+        // required: true
     },
     doctorName: {
         type: String,

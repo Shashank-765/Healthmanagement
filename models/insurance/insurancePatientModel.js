@@ -69,6 +69,12 @@ const insurancePatientSchema = new mongoose.Schema({
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Signup'
         }
+    },
+    ipfsCID: {
+        type: String
+    },
+    ipfsIV: {
+        type: String
     }
 }, { timestamps: true });
 

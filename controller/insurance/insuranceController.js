@@ -343,16 +343,64 @@ module.exports = {
                 });
             }
 
-            // Update verification status
+            console.log('Step 1: Found patient and insurance patient');
+
+            // Get complete medical history
+            const medicalHistory = await MedicalHistory.find({ patientId: patient._id })
+                .populate({
+                    path: 'doctorId',
+                    select: 'fullName',
+                    model: 'adddoctor'
+                })
+                .sort({ date: -1 });
+
+            console.log('Step 2: Retrieved medical history');
+
+            // Prepare data for IPFS storage
+            const ipfsData = {
+                patientId: patient._id,
+                name: patient.fullName,
+                email: patient.email,
+                phone: patient.contactnumber,
+                isVerified: true,
+                hasAccess: true,
+                accessRequest: {
+                    insuranceId: insurancePatient.accessRequest.insuranceId,
+                    insuranceName: insurancePatient.accessRequest.insuranceName,
+                    status: insurancePatient.accessRequest.status,
+                    requestDate: insurancePatient.accessRequest.requestDate,
+                    approvalDate: insurancePatient.accessRequest.approvalDate,
+                    approvedBy: insurancePatient.accessRequest.approvedBy
+                },
+                medicalHistory: medicalHistory.map(record => ({
+                    condition: record.condition,
+                    notes: record.notes,
+                    date: record.date,
+                    doctorId: record.doctorId._id,
+                    doctorName: record.doctorId.fullName
+                }))
+            };
+
+            console.log('Step 3: Prepared IPFS data:', JSON.stringify(ipfsData, null, 2));
+
+            try {
+                // Store data in IPFS
+                console.log('Step 4: Attempting IPFS upload...');
+                const { cid, iv } = await IPFSService.uploadEncryptedData(ipfsData);
+                console.log('Step 5: IPFS upload successful. CID:', cid, 'IV:', iv);
+
+                if (!cid || !iv) {
+                    throw new Error('IPFS upload failed - No CID or IV received');
+                }
+
+                // Update verification status and IPFS references
             insurancePatient.isVerified = true;
+                insurancePatient.ipfsCID = cid;
+                insurancePatient.ipfsIV = iv;
+                
+                console.log('Step 6: Updating insurance patient with IPFS data');
             await insurancePatient.save();
-
-            // Log the verification
-            console.log(`Patient ${patientName} verified successfully. ID: ${insurancePatient._id}, isVerified: ${insurancePatient.isVerified}`);
-
-            // Fetch the updated patient data to ensure we're sending the correct state
-            const updatedPatient = await InsurancePatient.findById(insurancePatient._id);
-            console.log('Updated patient data:', updatedPatient);
+                console.log('Step 7: Insurance patient updated successfully');
 
             res.status(200).json({
                 success: true,
@@ -362,9 +410,15 @@ module.exports = {
                     isVerified: true,
                     patientId: insurancePatient._id,
                     _id: insurancePatient._id,
-                    hasAccess: insurancePatient.hasAccess
+                        hasAccess: insurancePatient.hasAccess,
+                        ipfsCID: cid,
+                        ipfsIV: iv
                 }
             });
+            } catch (ipfsError) {
+                console.error('IPFS Error:', ipfsError);
+                throw new Error(`IPFS operation failed: ${ipfsError.message}`);
+            }
         } catch (error) {
             console.error('Error verifying patient:', error);
             res.status(500).json({
@@ -411,38 +465,28 @@ module.exports = {
 
             // Process each medical history record to get IPFS data
             const formattedHistory = await Promise.all(medicalHistory.map(async (record) => {
-                let condition = record.condition || 'No condition specified';
-                let notes = record.notes || 'No notes available';
-                let doctorName = record.doctorId?.fullName || 'Unknown Doctor';
-
-                // Try to get data from IPFS if available
-                if (record.ipfsCID && record.ipfsIV) {
-                    try {
-                        const ipfsData = await IPFSService.retrieveAndDecrypt(
-                            record.ipfsCID,
-                            record.ipfsIV
-                        );
-                        
-                        // Get condition and notes from IPFS
-                        condition = ipfsData.condition || condition;
-                        notes = ipfsData.notes || notes;
-                        // Get doctor name from IPFS if available
-                        if (ipfsData.doctorName) {
-                            doctorName = ipfsData.doctorName;
-                        }
-                    } catch (error) {
-                        console.error(`Error retrieving IPFS data for medical history ${record._id}:`, error);
-                        // Continue with MongoDB data if IPFS fails
-                    }
+                try {
+                    // Retrieve and decrypt IPFS data for each record
+                    const ipfsData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
+                    
+                    return {
+                        patientName: patient.fullName,
+                        doctorName: record.doctorId?.fullName || 'Unknown Doctor',
+                        condition: ipfsData.condition || record.condition || 'No condition specified',
+                        notes: ipfsData.notes || record.notes || 'No notes available',
+                        date: record.date || new Date()
+                    };
+                } catch (error) {
+                    console.error('Error retrieving IPFS data for record:', error);
+                    // Fallback to MongoDB data if IPFS retrieval fails
+                    return {
+                        patientName: patient.fullName,
+                        doctorName: record.doctorId?.fullName || 'Unknown Doctor',
+                        condition: record.condition || 'No condition specified',
+                        notes: record.notes || 'No notes available',
+                        date: record.date || new Date()
+                    };
                 }
-
-                return {
-                    patientName: patient.fullName || 'Unknown Patient',
-                    doctorName: doctorName,
-                    condition: condition,
-                    notes: notes,
-                    date: record.date
-                };
             }));
 
             res.status(200).json({

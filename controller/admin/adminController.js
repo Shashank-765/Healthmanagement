@@ -546,10 +546,10 @@ module.exports = {
             const formattedRequests = pendingRequests.map(request => ({
                 requestId: request._id,
                 patientDetails: {
-                    _id: request.patientId._id,
-                    name: request.patientId.fullName,
-                    email: request.patientId.email,
-                    phone: request.patientId.contactnumber
+                    _id: request.patientId ? request.patientId._id : null,
+                    name: request.patientId ? request.patientId.fullName : 'Unknown',
+                    email: request.patientId ? request.patientId.email : 'Unknown',
+                    phone: request.patientId ? request.patientId.contactnumber : 'Unknown'
                 },
                 insuranceDetails: {
                     name: request.accessRequest.insuranceName,

@@ -6,6 +6,8 @@ const adddoctorModel = require('../../models/doctor/adddoctorModel');
 const mongoose = require('mongoose');
 const medicalHistoryModel = require('../../models/medicalHistory/medicalHistoryModel');
 const IPFSService = require('./../../services/ipfsService');
+const patientModel = require('../../models/patient/addpatientModel');
+const doctorModel = require('../../models/doctor/adddoctorModel');
 const medicalHistoryController = {
     createMedicalHistory: async (req, res) => {
         try { 
@@ -481,26 +483,70 @@ const medicalHistoryController = {
     },
     createPatientSelfHistory: async (req, res) => {
         try {
-            const { fullName, doctorName, condition, notes, date } = req.body;
-    
-            // Validate required fields
-            if (!fullName || !condition || !notes) {
-                return res.status(400).json({
+            const { email, fullName, doctorName, condition, notes, date } = req.body;
+
+            // Check if user is authenticated and is a patient
+            if (!req.user || req.user.role !== 'patient') {
+                return res.status(403).json({
                     success: false,
-                    message: "Full name, condition, and notes are required"
+                    message: "Only patients can create self medical history"
                 });
             }
-    
-            // Call the service function
-            const result = await medicalHistoryService.createPatientSelfHistory({
-                fullName,
-                doctorName: doctorName || 'Self',
+
+            let patient = await patientModel.findOne({ email: email.toLowerCase() });
+            
+            if (!patient) {
+                console.log('Patient not found with email:', email);
+                return res.status(404).json({
+                    success: false,
+                    message: "Patient not found"
+                });
+            }
+
+            // For self-history, we'll use the patient's ID as the doctorId
+            const doctorId = patient._id;
+             
+            // Prepare history object for IPFS
+            const historyObj = {
+                patientId: patient._id,
+                doctorId: doctorId,
+                doctorName: 'Self',
                 condition,
                 notes,
-                date
+                date: date || new Date()
+            };
+
+            const { cid, iv } = await IPFSService.uploadEncryptedData(historyObj);
+            
+            const newHistory = new medicalHistoryModel({
+                patientId: patient._id,
+                doctorId: doctorId,
+                doctorName: 'Self',
+                date: date || new Date(),
+                ipfsCID: cid,
+                ipfsIV: iv,
+                version: 1
             });
-    
-            res.status(201).json(result);
+
+            await newHistory.save();
+            
+            return res.status(201).json({
+                success: true,
+                message: "Medical history created successfully",
+                data: {
+                    _id: newHistory._id,
+                    patientId: patient._id,
+                    patientName: fullName,
+                    doctorId: newHistory.doctorId,
+                    doctorName: newHistory.doctorName,
+                    condition,
+                    notes,    
+                    date: newHistory.date,
+                    ipfsCID: cid,
+                    ipfsIV: iv,
+                    version: newHistory.version
+                }
+            });
         } catch (error) {
             console.error("Error in createPatientSelfHistory:", error);
             res.status(500).json({

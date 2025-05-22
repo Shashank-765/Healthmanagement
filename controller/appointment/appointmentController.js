@@ -27,57 +27,41 @@ const appointmentController = {
                 appointmentTime,
                 reason
             };
+            console.log('[DEBUG] Appointment data to be sent to service:', appointmentData);
 
-            // Set timeout for the entire operation
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Operation timed out')), 40000); // Increased timeout to 40 seconds
-            });
+            const result = await appointmentService.createAppointment(appointmentData);
+            console.log('[DEBUG] Result from appointmentService.createAppointment:', result);
 
-            // Call service to create appointment with timeout
-            const result = await Promise.race([
-                appointmentService.createAppointment(appointmentData),
-                timeoutPromise
-            ]);
-            
-            // Send response immediately after getting the result
-            res.writeHead(201, { 'Content-Type': 'application/json' });
-            res.write(JSON.stringify(result));
-            res.end();
+            // Create notification
+            if (result.success) {
+                try {
+                    console.log('[DEBUG] Looking for doctor with ID:', doctorId);
+                    const doctor = await adddoctorModel.findById(doctorId);
 
+                    if (doctor) {
+                        console.log('[DEBUG] Doctor found:', doctor._id);
+                        await notificationController.createAppointmentNotificationInternal({
+                            doctorId: doctor._id,
+                            patientId: patient._id,
+                            appointmentId: result.data.appointmentId,
+                            patientName: patient.fullName
+                        });
+                        console.log('[DEBUG] Notification creation result:', notification);
+                    } else {
+                        console.error('[ERROR] Doctor not found with ID:', doctorId);
+                    }
+                } catch (notificationError) {
+                    console.error('[ERROR] Exception while creating notification:', notificationError);
+                }
+            } else {
+                console.error('[ERROR] Appointment creation failed:', result);
+            }
+
+            res.status(201).json(result);
+            console.log('[DEBUG] Appointment creation response sent to client.');
         } catch (error) {
-            console.error('Appointment creation error:', error);
-            
-            // Handle specific error types
-            if (error.message.includes('required')) {
-                return res.status(400).json({
-                    success: false,
-                    message: error.message
-                });
-            }
-            
-            if (error.message.includes('not found')) {
-                return res.status(404).json({
-                    success: false,
-                    message: error.message
-                });
-            }
-            
-            if (error.message.includes('time slot')) {
-                return res.status(409).json({
-                    success: false,
-                    message: error.message
-                });
-            }
-
-            if (error.message.includes('timed out')) {
-                return res.status(504).json({
-                    success: false,
-                    message: 'Request timed out. Please check your appointment list to confirm if it was created.'
-                });
-            }
-
-            // Default error response
-            return res.status(500).json({
+            console.error('[ERROR] Exception in createAppointment:', error);
+            res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to create appointment'
             });
@@ -499,14 +483,6 @@ const appointmentController = {
                         appointment.ipfsCID,
                         appointment.ipfsIV
                     );
-
-                    console.log(`Successfully retrieved IPFS data for appointment ${appointment._id}:`, {
-                        date: sensitiveData.appointmentDate,
-                        time: sensitiveData.appointmentTime,
-                        ipfsStatus: sensitiveData.status,
-                        mongoStatus: appointment.status
-                    });
-
                     return {
                         _id: appointment._id,
                         patientName: appointment.patientId?.fullName || 'N/A',

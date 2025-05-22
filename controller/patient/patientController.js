@@ -69,11 +69,8 @@ module.exports = {
         try {
             const { email, password } = req.body;
 
-            // Login validate karo
-            const { patient, sensitiveData, token } = await patientLoginService.validateLogin(email, password);
-
-            // Login data save karo
-            const loginData = {
+  const { patient, sensitiveData, token } = await patientLoginService.validateLogin(email, password);
+const loginData = {
                 email: patient.email,
                 password: sensitiveData.password,
                 token: token,

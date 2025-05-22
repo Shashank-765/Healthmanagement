@@ -5,7 +5,7 @@ const adminRoute = require("../routes/adminRoute");
 const appointmentRoute = require("../routes/appointmentRoute"); 
 const medicalHistoryRoutes = require("../routes/medicalHistoryRoutes");
 const insuranceRoute = require("../routes/insuranceRoute");
-
+// const notificationRoute = require("../routes/notificationRoute");
 const setupRoutes = (app) => {
     app.use('/api/v1/doctor', doctorRoute);
     app.use('/api/v1/admin', adminRoute);
@@ -13,6 +13,7 @@ const setupRoutes = (app) => {
     app.use('/api/v1/patient', patientRoute);
     app.use('/api/v1/medical-history', medicalHistoryRoutes);
     app.use('/api/v1/insurance', insuranceRoute);
+    // app.use('/api/v1/notification', notificationRoute);
 };
 
 module.exports = setupRoutes;
