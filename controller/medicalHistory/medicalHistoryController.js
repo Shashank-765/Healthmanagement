@@ -8,198 +8,98 @@ const medicalHistoryModel = require('../../models/medicalHistory/medicalHistoryM
 const IPFSService = require('./../../services/ipfsService');
 const patientModel = require('../../models/patient/addpatientModel');
 const doctorModel = require('../../models/doctor/adddoctorModel');
+const fs = require('fs').promises;
+
 const medicalHistoryController = {
     createMedicalHistory: async (req, res) => {
         try { 
-            const {
-                patientEmail,
-                doctorEmail,
-                condition,
-                notes,
-                date
-            } = req.body;
-
-            // Get token
             const token = req.headers.authorization?.split(' ')[1];
             if (!token) {
-                console.log(" No token provided");
-                return res.status(401).json({
-                    success: false,
-                    message: "No token provided"
-                });
+                return res.status(401).json({ success: false, message: "No token provided" });
             }
-
-            // Decode token
-            const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
-         
-
-            // Find doctor using email
-            console.log("4. Finding doctor with email:", doctorEmail);
-            const doctor = await adddoctorModel.findOne({ 
-                email: doctorEmail.toLowerCase()
-            });
-
+            jwt.verify(token, process.env.JWT_SECRET);
+            const patientEmail = req.body.patientEmail;
+            const doctorEmail = req.body.doctorEmail;
+            const condition = req.body.condition;
+            const notes = req.body.notes;
+            const date = req.body.date;
+            if (!patientEmail || !doctorEmail || !condition || !notes) {
+                return res.status(400).json({ success: false, message: "Missing required fields" });
+            }
+            const doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase() });
             if (!doctor) {
-                console.log(" Doctor not found");
-                return res.status(400).json({
-                    success: false,
-                    message: "Doctor not found with the provided email."
-                });
+                return res.status(400).json({ success: false, message: "Doctor not found with the provided email." });
             }
-            // Find patient
-            const patient = await AddPatient.findOne({ 
-                email: patientEmail.toLowerCase()
-            });
-
+            const patient = await AddPatient.findOne({ email: patientEmail.toLowerCase() });
             if (!patient) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Patient not found with the provided email."
-                });
+                return res.status(400).json({ success: false, message: "Patient not found with the provided email." });
             }
-            // Check for valid appointment
-            // 7. Prepare sensitive data for IPFS
-            
-            const sensitiveData = {
+            // Handle single file upload
+            let fileData = null;
+            let filesData = [];
+
+            if (req.file) {
+                // Handle single file upload
+                try {
+                    const fileContent = await fs.readFile(req.file.path);
+                    fileData = {
+                        content: fileContent,
+                        originalName: req.file.originalname,
+                        mimeType: req.file.mimetype,
+                        size: req.file.size
+                    };
+                    await fs.unlink(req.file.path);
+                } catch (error) {
+                    return res.status(500).json({ success: false, message: "Error processing uploaded file" });
+                }
+            } else if (req.files && req.files.length > 0) {
+                // Handle multiple file uploads
+                try {
+                    for (const file of req.files) {
+                        const fileContent = await fs.readFile(file.path);
+                        filesData.push({
+                            content: fileContent,
+                            originalName: file.originalname,
+                            mimeType: file.mimetype,
+                            size: file.size
+                        });
+                        await fs.unlink(file.path);
+                    }
+                } catch (error) {
+                    return res.status(500).json({ success: false, message: "Error processing uploaded files" });
+                }
+            }
+
+            // Prepare data for IPFS storage
+            const ipfsData = {
+                condition,
+                notes,
+                date,
+                file: fileData,
+                files: filesData.length > 0 ? filesData : undefined
+            };
+
+            // Upload to IPFS
+            const { cid, iv } = await IPFSService.uploadEncryptedData(ipfsData);
+
+            // Call the service with the file data and IPFS information
+            const result = await medicalHistoryService.createMedicalHistory({
                 patientId: patient._id,
                 doctorId: doctor._id,
                 patientEmail: patientEmail.toLowerCase(),
                 doctorEmail: doctorEmail.toLowerCase(),
                 condition,
                 notes,
-                date: date || new Date()
-            };
-
-            // Upload to IPFS
-            const { cid, iv } = await IPFSService.uploadEncryptedData(sensitiveData);
-
-            // Verify IPFS data by retrieving and comparing emails
-            const retrievedData = await IPFSService.retrieveAndDecrypt(cid, iv);
-            
-            // Verify that the retrieved emails match the original ones
-            if (retrievedData.patientEmail !== patientEmail.toLowerCase() || 
-                retrievedData.doctorEmail !== doctorEmail.toLowerCase()) {
-                return res.status(500).json({
-                    success: false,
-                    message: "Email verification failed after IPFS storage"
-                });
-            }
-
-            // Check for valid appointment after email verification
-            console.log("Looking for appointment with the following criteria:");
-            console.log("Patient ID:", patient._id);
-            console.log("Doctor ID:", doctor._id);
-            console.log("Patient Email:", retrievedData.patientEmail);
-            console.log("Doctor Email:", retrievedData.doctorEmail);
-            
-            // Look for appointment in various ways
-            let appointment = await appointmentModel.findOne({
-                $or: [
-                    {
-                        patientId: patient._id,
-                        doctorId: doctor._id,
-                    },
-                    {
-                        patientEmail: retrievedData.patientEmail,
-                        doctorEmail: retrievedData.doctorEmail
-                    },
-                    // Check if one of these IDs is embedded in the arrays
-                    {
-                        patientId: patient.patientId || patient._id
-                    },
-                    {
-                        doctorId: doctor.doctorId || doctor._id
-                    }
-                ],
-                status: { $in: ['confirmed', 'confirm', 'pending', 'approved', 'completed'] }
-            });
-            
-            console.log("Appointment found:", appointment ? "Yes" : "No");
-            
-            // If not found, check the doctor's appointments array
-            if (!appointment && doctor.appointments && doctor.appointments.length > 0) {
-                console.log("Checking doctor's appointments array:", doctor.appointments.length);
-                appointment = true; // Consider any entry as valid
-            }
-            
-            // If not found, check the patient's appointments array
-            if (!appointment && patient.appointments && patient.appointments.length > 0) {
-                console.log("Checking patient's appointments array:", patient.appointments.length);
-                appointment = true; // Consider any entry as valid
-            }
-
-            if (!appointment) {
-                console.log(" No valid appointment found");
-                
-                // For debugging: temporarily bypass in development
-                if (process.env.NODE_ENV === 'development') {
-                    console.log("Development mode: bypassing appointment check");
-                } else {
-                    return res.status(400).json({
-                        success: false,
-                        message: "No valid appointment found between you and this patient."
-                    });
-                }
-            }
-
-            // Create medical history record
-            const medicalHistory = new medicalHistoryModel({
-                patientId: patient._id,
-                doctorId: doctor._id,
-                doctorName: doctor.fullName,
+                date,
+                file: fileData,
+                files: filesData.length > 0 ? filesData : undefined,
                 ipfsCID: cid,
-                ipfsIV: iv,
-                version: 1,
-                date: date || new Date()
+                ipfsIV: iv
             });
 
-            const savedHistory = await medicalHistory.save();
-          // 11. Prepare response data
-            const responseData = {
-                _id: savedHistory._id,
-                patientId: savedHistory.patientId,
-                doctorId: savedHistory.doctorId,
-                patientName: patient.fullName,
-                doctorName: doctor.fullName,
-                condition,
-                notes,
-                date: savedHistory.date,
-                ipfsCID: savedHistory.ipfsCID,
-                ipfsIV: savedHistory.ipfsIV,
-                version: savedHistory.version,
-                createdAt: savedHistory.createdAt,
-                updatedAt: savedHistory.updatedAt
-            };
-
-            res.status(201).json({
-                success: true,
-                message: "Medical history created successfully",
-                data: responseData
-            });
-
+            return res.status(201).json(result);
         } catch (error) {
-            console.error(" Error in createMedicalHistory:", error);
-            console.error("Error stack:", error.stack);
-            
-            if (error.name === 'JsonWebTokenError') {
-                return res.status(401).json({
-                    success: false,
-                    message: "Invalid token"
-                });
-            }
-
-            // Check if it's a duplicate key error
-            if (error.code === 11000) {
-                return res.status(400).json({
-                    success: false,
-                    message: "A medical history record already exists for this patient and doctor"
-                });
-            }
-
-            res.status(500).json({
-                success: false,
-                message: error.message || "Failed to create medical history"
-            });
+            res.status(500).json({ success: false, message: error.message || "Failed to create medical history" });
         }
     },    
 
@@ -253,25 +153,62 @@ const medicalHistoryController = {
             const histories = await medicalHistoryModel.find({ patientId: patient._id })
                 .populate('doctorId', 'fullName');
 
+            console.log('Found histories:', histories.length);
+
             const historiesWithDetails = await Promise.all(histories.map(async (record) => {
                 let ipfsData = {};
                 try {
                     if (record.ipfsCID && record.ipfsIV) {
+                        console.log('Decrypting IPFS data for record:', record._id);
+                        console.log('IPFS CID:', record.ipfsCID);
+                        console.log('IPFS IV:', record.ipfsIV);
+                        
                         ipfsData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
+                        console.log('Decrypted IPFS data:', ipfsData);
                     }
                 } catch (e) {
+                    console.error('Error decrypting IPFS data:', e);
                     ipfsData = { error: 'Failed to decrypt IPFS data' };
                 }
-                return {
+
+                // Get file information from either file or files array in IPFS data
+                let fileInfo = null;
+                if (ipfsData.files && Array.isArray(ipfsData.files)) {
+                    fileInfo = ipfsData.files.map(file => ({
+                        originalName: file.originalName,
+                        mimeType: file.mimeType,
+                        size: file.size
+                    }));
+                } else if (ipfsData.file) {
+                    fileInfo = [{
+                        originalName: ipfsData.file.originalName,
+                        mimeType: ipfsData.file.mimeType,
+                        size: ipfsData.file.size
+                    }];
+                }
+
+                const historyWithDetails = {
                     _id: record._id,
-                    doctorName: record.doctorId?.fullName || record.doctorName || 'N/A',
+                    doctorId: record.doctorId,
+                    doctorName: record.doctorId?.fullName || record.doctorName || 'Self',
                     condition: ipfsData.condition || 'N/A',
-                    notes: ipfsData.notes || record.notes || 'N/A',
+                    notes: ipfsData.notes || 'N/A',
                     date: record.date,
                     createdAt: record.createdAt,
-                    updatedAt: record.updatedAt
+                    updatedAt: record.updatedAt,
+                    fileInfo: fileInfo || record.fileInfo, 
+                    ipfsData: {
+                        cid: record.ipfsCID,
+                        iv: record.ipfsIV,
+                        file: ipfsData.file || ipfsData.files?.[0]
+                    }
                 };
+
+                console.log('Processed history record:', historyWithDetails);
+                return historyWithDetails;
             }));
+
+            console.log('Final response data:', historiesWithDetails);
 
             res.status(200).json({
                 success: true,
@@ -279,7 +216,7 @@ const medicalHistoryController = {
                 data: historiesWithDetails
             });
         } catch (error) {
-            console.log("Error fetching patient's medical history:", error.message);
+            console.error("Error fetching patient's medical history:", error);
             res.status(500).json({
                 success: false,
                 message: error.message || "Failed to fetch medical history"
@@ -290,10 +227,22 @@ const medicalHistoryController = {
     editMedicalHistory: async (req, res) => {
         try {
             const doctorEmail = req.params.email;
-            const { historyId, condition, notes } = req.body;
-            // Validate request body
+            // Check if req.body exists
+            if (!req.body) {
+                console.error('Request body is undefined');
+                return res.status(400).json({
+                    success: false,
+                    message: "Request body is missing"
+                });
+            }
+
+            // Extract data from FormData with fallbacks
+            const historyId = req.body.historyId || req.body.history_id;
+            const condition = req.body.condition;
+            const notes = req.body.notes;
+            const date = req.body.date;
+
             if (!historyId || !condition || !notes) {
-                console.log(' Missing required fields');
                 return res.status(400).json({
                     success: false,
                     message: "History ID, condition and notes are required"
@@ -326,7 +275,7 @@ const medicalHistoryController = {
             console.log('3. Finding medical history record');
             const record = await medicalHistoryModel.findOne({
                 _id: historyId,
-                doctorId: doctor._id // Ensure the record belongs to this doctor
+                doctorId: doctor._id
             });
 
             if (!record) {
@@ -336,8 +285,7 @@ const medicalHistoryController = {
                     message: "Medical history not found or you don't have permission to edit it"
                 });
             }
-            // 3. Get patient details
-            console.log('4. Finding patient');
+
             const patient = await AddPatient.findById(record.patientId);
             if (!patient) {
                 console.log(' Patient not found');
@@ -347,46 +295,89 @@ const medicalHistoryController = {
                 });
             }
 
-            // 4. Prepare update data
-             const updateData = {
+            // Handle file upload if present
+            let fileData = null;
+            if (req.file) {
+                try {
+                    const fileContent = await fs.readFile(req.file.path);
+                    fileData = {
+                        content: fileContent,
+                        originalName: req.file.originalname,
+                        mimeType: req.file.mimetype,
+                        size: req.file.size
+                    };
+                    // Delete the temporary file after reading
+                    await fs.unlink(req.file.path);
+                } catch (error) {
+                    console.error("Error processing uploaded file:", error);
+                    return res.status(500).json({
+                        success: false,
+                        message: "Error processing uploaded file"
+                    });
+                }
+            }
+
+            // Prepare update data
+            const updateData = {
                 condition: condition.trim(),
                 notes: notes.trim(),
-                date: new Date()
+                date: date || new Date()
             };
 
-            // 5. Call service to update medical history
-           const updatedHistory = await medicalHistoryService.editMedicalHistory(record._id, updateData);
+            // Get the existing IPFS data
+            const existingData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
 
-            // 6. Send response
-            console.log('7. Sending response');
-            res.status(200).json({
+            // Update the IPFS data with new information
+            const updatedIPFSData = {
+                ...existingData,
+                condition: updateData.condition,
+                notes: updateData.notes,
+                date: updateData.date,
+                file: fileData || existingData.file
+            };
+
+            // Upload updated data to IPFS
+            const { cid, iv } = await IPFSService.uploadEncryptedData(updatedIPFSData);
+
+            // Create a new document (new version)
+            const newHistory = new medicalHistoryModel({
+                patientId: record.patientId,
+                doctorId: record.doctorId,
+                date: updateData.date,
+                ipfsCID: cid,
+                ipfsIV: iv,
+                version: (record.version || 1) + 1,
+                hl: {
+                    previousCID: record.ipfsCID,
+                    previousIV: record.ipfsIV,
+                    date: new Date()
+                }
+            });
+            await newHistory.save();
+
+            res.status(201).json({
                 success: true,
-                message: "Medical history updated successfully",
+                message: "Medical history updated successfully (new version created)",
                 data: {
-                    ...updatedHistory.data,
+                    ...newHistory.toObject(),
                     patientName: patient.fullName,
                     doctorName: doctor.fullName
                 }
             });
-            console.log('=== Medical History Edit Controller Complete ===\n');
         } catch (error) {
-            console.error(' Error in editMedicalHistory controller:', error);
-            
-            // Handle specific error types
+            console.error('Error in editMedicalHistory controller:', error);
             if (error.name === 'ValidationError') {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid data provided"
                 });
             }
-            
             if (error.name === 'CastError') {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid ID format"
                 });
             }
-
             res.status(500).json({
                 success: false,
                 message: "An error occurred while updating the medical history"
@@ -395,46 +386,37 @@ const medicalHistoryController = {
     },
     getMedicalHistoryByDoctor: async (req, res) => {
         try {
-          
             const email = req.params.email;
-          
+            console.log('Getting medical history for doctor email:', email);
 
             if (!email) {
-                console.log(' No email provided');
                 return res.status(400).json({
                     success: false,
                     message: "Email is required"
                 });
             }
 
-            // Find doctor using email
-     
             const doctor = await adddoctorModel.findOne({ 
                 email: email.toLowerCase()
             });
 
             if (!doctor) {
-                console.log(' Doctor not found');
                 return res.status(404).json({
                     success: false,
                     message: "Doctor not found"
                 });
             }
 
-            // Get all medical history records for this doctor
-       
+            console.log('Found doctor:', doctor._id);
             const result = await medicalHistoryService.getMedicalHistoryByDoctor(doctor._id);
-            console.log('4. Records fetched:', result.data?.length || 0);
+            console.log('Service result:', JSON.stringify(result, null, 2));
 
             if (!result.success) {
-                console.log(' Service returned error');
                 return res.status(500).json(result);
             }
 
             // Group records by patient
-            console.log('5. Grouping records by patient');
             const groupedRecords = {};
-            
             for (const record of result.data) {
                 const patientId = record.patientId;
                 const patientName = record.patientName;
@@ -449,25 +431,28 @@ const medicalHistoryController = {
                     };
                 }
 
-                groupedRecords[patientId].historyChain.push({
+                // Create history chain entry
+                const historyEntry = {
                     _id: record._id,
                     version: record.version || 1,
-                    condition: record.condition || 'N/A',
-                    notes: record.notes || 'N/A',
-                    date: record.date || new Date(),
+                    condition: record.condition,
+                    notes: record.notes,
+                    date: record.date,
                     ipfsCID: record.ipfsCID,
                     ipfsIV: record.ipfsIV,
                     createdAt: record.createdAt,
-                    updatedAt: record.updatedAt
-                });
+                    updatedAt: record.updatedAt,
+                    fileInfo: record.fileInfo
+                };
+
+                groupedRecords[patientId].historyChain.push(historyEntry);
             }
 
-            // Sort history chains by version
-     
             const formattedRecords = Object.values(groupedRecords).map(group => ({
                 ...group,
                 historyChain: group.historyChain.sort((a, b) => b.version - a.version)
             }));
+
             res.status(200).json({
                 success: true,
                 message: "Medical history fetched successfully",
@@ -485,7 +470,6 @@ const medicalHistoryController = {
         try {
             const { email, fullName, doctorName, condition, notes, date } = req.body;
 
-            // Check if user is authenticated and is a patient
             if (!req.user || req.user.role !== 'patient') {
                 return res.status(403).json({
                     success: false,
@@ -503,50 +487,39 @@ const medicalHistoryController = {
                 });
             }
 
-            // For self-history, we'll use the patient's ID as the doctorId
-            const doctorId = patient._id;
-             
-            // Prepare history object for IPFS
-            const historyObj = {
-                patientId: patient._id,
-                doctorId: doctorId,
-                doctorName: 'Self',
+            // Handle single file upload
+            let fileData = null;
+            if (req.file) {
+                try {
+                    const fileContent = await fs.readFile(req.file.path);
+                    fileData = {
+                        content: fileContent,
+                        originalName: req.file.originalname,
+                        mimeType: req.file.mimetype,
+                        size: req.file.size
+                    };
+                    // Delete the temporary file after reading
+                    await fs.unlink(req.file.path);
+                } catch (error) {
+                    console.error("Error processing uploaded file:", error);
+                    return res.status(500).json({
+                        success: false,
+                        message: "Error processing uploaded file"
+                    });
+                }
+            }
+
+            // Call the service with the file data
+            const result = await medicalHistoryService.createPatientSelfHistory({
+                fullName,
+                doctorName,
                 condition,
                 notes,
-                date: date || new Date()
-            };
-
-            const { cid, iv } = await IPFSService.uploadEncryptedData(historyObj);
-            
-            const newHistory = new medicalHistoryModel({
-                patientId: patient._id,
-                doctorId: doctorId,
-                doctorName: 'Self',
-                date: date || new Date(),
-                ipfsCID: cid,
-                ipfsIV: iv,
-                version: 1
+                date,
+                file: fileData
             });
 
-            await newHistory.save();
-            
-            return res.status(201).json({
-                success: true,
-                message: "Medical history created successfully",
-                data: {
-                    _id: newHistory._id,
-                    patientId: patient._id,
-                    patientName: fullName,
-                    doctorId: newHistory.doctorId,
-                    doctorName: newHistory.doctorName,
-                    condition,
-                    notes,    
-                    date: newHistory.date,
-                    ipfsCID: cid,
-                    ipfsIV: iv,
-                    version: newHistory.version
-                }
-            });
+            return res.status(201).json(result);
         } catch (error) {
             console.error("Error in createPatientSelfHistory:", error);
             res.status(500).json({
@@ -555,43 +528,31 @@ const medicalHistoryController = {
             });
         }
     }, 
-    getIPFSDataByCID: async (req, res) => {
+    getImageByHistoryId: async (req, res) => {
         try {
-            const { cid, iv } = req.query;
-
-            if (!cid || !iv) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Both CID and IV are required"
-                });
+            const { historyId } = req.params;
+            if (!historyId) {
+                return res.status(400).json({ success: false, message: "History ID is required" });
             }
 
-            console.log('Retrieving IPFS data with:', { cid, iv });
-
-            // Get data from IPFS using the service with both CID and IV
-            const ipfsData = await IPFSService.retrieveAndDecrypt(cid, iv);
-
-            if (!ipfsData) {
-                return res.status(404).json({
-                    success: false,
-                    message: "No data found for the provided CID and IV"
-                });
+            // Find the record in your DB
+            const record = await medicalHistoryModel.findById(historyId);
+            if (!record || !record.ipfsCID || !record.ipfsIV) {
+                return res.status(404).send('Not found');
             }
 
-            return res.status(200).json({
-                success: true,
-                message: "IPFS data retrieved successfully",
-                data: ipfsData
-            });
+            // Fetch from IPFS
+            const ipfsData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
+            if (!ipfsData || !ipfsData.file) {
+                return res.status(404).send('File not found');
+            }
 
-        } catch (error) {
-            console.error('Error in getIPFSDataByCID:', error);
-            return res.status(500).json({
-                success: false,
-                message: error.message || "Error retrieving IPFS data"
-            });
+            res.set('Content-Type', ipfsData.file.mimeType);
+            return res.send(Buffer.from(ipfsData.file.content.data));
+        } catch (err) {
+            res.status(500).send('Server error');
         }
-    } 
+    }
 };
 
 

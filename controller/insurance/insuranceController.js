@@ -15,7 +15,7 @@ const IPFSService = require('../../services/ipfsService');
 
 module.exports = {
     insuranceSignup: async (req, res) => {
-        const { name, phone, email, password, companyName, role } = req.body;
+        const { name, phone, email, password, companyName,companyweburl,designation,registrationNumber, role } = req.body;
         const image = req.file ? req.file.path : null;
 
         // Basic manual validation
@@ -40,6 +40,9 @@ module.exports = {
                 phone,
                 password: hashedPassword,
                 companyName,
+                companyweburl,
+                designation,
+                registrationNumber,
                 role,
                 image
             };
@@ -495,25 +498,52 @@ module.exports = {
             // Process each medical history record to get IPFS data
             const formattedHistory = await Promise.all(medicalHistory.map(async (record) => {
                 try {
-                    // Retrieve and decrypt IPFS data for each record
                     const ipfsData = await IPFSService.retrieveAndDecrypt(record.ipfsCID, record.ipfsIV);
-                    
+
+                    // Extract fileInfo
+                    let fileInfo = null;
+                    if (ipfsData.files && Array.isArray(ipfsData.files)) {
+                        fileInfo = ipfsData.files.map(file => ({
+                            originalName: file.originalName,
+                            mimeType: file.mimeType,
+                            size: file.size
+                        }))[0]; // Use the first file for simplicity
+                    } else if (ipfsData.file) {
+                        fileInfo = {
+                            originalName: ipfsData.file.originalName,
+                            mimeType: ipfsData.file.mimeType,
+                            size: ipfsData.file.size
+                        };
+                    }
+
                     return {
+                        _id: record._id,
                         patientName: patient.fullName,
                         doctorName: record.doctorId?.fullName || 'Unknown Doctor',
                         condition: ipfsData.condition || record.condition || 'No condition specified',
                         notes: ipfsData.notes || record.notes || 'No notes available',
-                        date: record.date || new Date()
+                        date: record.date || new Date(),
+                        fileInfo,
+                        ipfsData: {
+                            cid: record.ipfsCID,
+                            iv: record.ipfsIV
+                        }
                     };
                 } catch (error) {
                     console.error('Error retrieving IPFS data for record:', error);
                     // Fallback to MongoDB data if IPFS retrieval fails
                     return {
+                        _id: record._id,
                         patientName: patient.fullName,
                         doctorName: record.doctorId?.fullName || 'Unknown Doctor',
                         condition: record.condition || 'No condition specified',
                         notes: record.notes || 'No notes available',
-                        date: record.date || new Date()
+                        date: record.date || new Date(),
+                        fileInfo: null,
+                        ipfsData: {
+                            cid: record.ipfsCID,
+                            iv: record.ipfsIV
+                        }
                     };
                 }
             }));
@@ -727,6 +757,67 @@ module.exports = {
             res.status(500).json({
                 success: false,
                 message: "Error syncing medical history data",
+                error: error.message
+            });
+        }
+    },
+    getInsuranceDataByCID: async (req, res) => {
+        try {
+            const { cid, email } = req.params;
+
+            if (!cid || !email) {
+                return res.status(400).json({
+                    success: false,
+                    message: "CID and email are required"
+                });
+            }
+
+            // Find the insurance user by email
+            const insuranceUser = await Signup.findOne({ email });
+            if (!insuranceUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Insurance user not found"
+                });
+            }
+
+            // Verify that the provided CID matches the user's stored CID
+            if (insuranceUser.ipfsCID !== cid) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Invalid CID for this user"
+                });
+            }
+
+            // Retrieve and decrypt data from IPFS
+            const decryptedData = await IPFSService.retrieveAndDecrypt(
+                insuranceUser.ipfsCID,
+                insuranceUser.ipfsIV
+            );
+
+            // Format the response
+            const responseData = {
+                name: insuranceUser.name,
+                email: insuranceUser.email,
+                phone: decryptedData.phone,
+                companyName: decryptedData.companyName,
+                companyweburl: decryptedData.companyweburl,
+                designation: decryptedData.designation,
+                registrationNumber: decryptedData.registrationNumber,
+                role: decryptedData.role
+            };
+
+            res.status(200).json({
+                success: true,
+                message: "Insurance data retrieved successfully",
+                data: responseData
+            });
+
+        } catch (error) {
+            console.error('Error fetching insurance data:', error);
+            res.status(500).json({
+                success: false,
+                message: "Error fetching insurance data",
                 error: error.message
             });
         }

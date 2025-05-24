@@ -18,5 +18,6 @@ router.post("/handle-access-request", authenticateToken, insuranceController.han
 
 // Add manual sync route - ideally this would be an admin operation or triggered by a cron job
 router.post("/sync-medical-history", authenticateToken, insuranceController.syncMedicalHistoryData);
+router.get("/insurance-data/:cid/:email",insuranceController.getInsuranceDataByCID);
 
 module.exports = router; 

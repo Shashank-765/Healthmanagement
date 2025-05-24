@@ -38,6 +38,17 @@ const signupSchema = new Schema({
         type: String,
         // required: [true,'companyName is required'],
     },
+    companyweburl:{
+        type:String
+    },
+    registrationNumber: {
+        type: String,
+        // required: [true,'registrationNumber is required'],
+    },
+    designation:{
+        type: String,
+        // required: [true,'designation is required'],
+    },
     role: {
         type: String,
         // required: true

@@ -168,11 +168,16 @@ module.exports = {
             const validatedData = await createdDoctor.validateDoctorData(doctorData, userRole);
             const newDoctor = await createdDoctor.saveDoctor(validatedData);
 
+            // Fetch the newly created doctor with decrypted IPFS data
+            const filters = { fullName: newDoctor.fullName };
+            const doctors = await doctorManagementService.getDoctors(filters);
+            const createdDoctorWithIPFSData = doctors.length > 0 ? doctors[0] : newDoctor;
+
             return res.status(201).json({
                 success: true,
                 message: "Doctor created successfully",
                 data: {
-                    doctor: newDoctor,
+                    doctor: createdDoctorWithIPFSData,
                     fileInfo
                 }
             });
@@ -209,6 +214,7 @@ module.exports = {
 
     getDoctors: async (req, res) => {
         try {
+            console.log('Starting getDoctors controller');
             const filters = {
                 specialization: req.query.specialization,
                 fullName: req.query.fullName
@@ -218,118 +224,26 @@ module.exports = {
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
-            // Build query
-            let query = {};
-            if (filters.specialization) {
-                query.specialization = { $regex: new RegExp(filters.specialization, 'i') };
-            }
-            if (filters.fullName) {
-                query.fullName = { $regex: new RegExp(filters.fullName, 'i') };
-            }
 
-            // Count total matching docs
-            const totalCount = await adddoctorModel.countDocuments(query);
-       // Fetch all doctor data including IPFS references
-            const doctors = await adddoctorModel.find(query)
-                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio ipfsCID ipfsIV')
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean();
-            if (doctors.length === 0) {
-                   return res.status(200).json({
-                    success: true,
-                    message: "No doctors found with the given filters",
-                    data: [],
-                    totalCount,
-                    totalPages: Math.ceil(totalCount / limit),
-                    page
-                });
-            }
+            // Get total count for pagination
+            const totalCount = await adddoctorModel.countDocuments({
+                ...(filters.specialization && { specialization: { $regex: new RegExp(filters.specialization, 'i') } }),
+                ...(filters.fullName && { fullName: { $regex: new RegExp(filters.fullName, 'i') } })
+            });
 
-            // Process each doctor and get missing data from IPFS if needed
-            const processedDoctors = await Promise.all(doctors.map(async (doctor) => {
-                try {
-                    // Check if important fields are missing
-                    const needsIPFSData = !doctor.specialization || !doctor.contactnumber || doctor.experience === undefined;
-                    
-                    if (needsIPFSData && doctor.ipfsCID && doctor.ipfsIV) {
-                        try {
-                            const ipfsData = await IPFSService.retrieveAndDecrypt(
-                                doctor.ipfsCID,
-                                doctor.ipfsIV
-                            );
-                            
-                            // Merge IPFS data with existing data
-                            return {
-                                _id: doctor._id,
-                                fullName: doctor.fullName,
-                                email: doctor.email,
-                                specialization: doctor.specialization || ipfsData.specialization || 'Not Available',
-                                experience: doctor.experience !== undefined ? doctor.experience : (ipfsData.yearsOfExperience || 0),
-                                availability: doctor.availability || 'Available',
-                                contactnumber: doctor.contactnumber || ipfsData.contactNumber || 'Not Available',
-                                qualification: doctor.qualification || ipfsData.qualification || 'MBBS',
-                                address: doctor.address || ipfsData.address || 'Not provided',
-                                bio: doctor.bio || ipfsData.bio || '',
-                                profileimage: doctor.profileimage || ipfsData.profileimage || ''
-                            };
-                        } catch (ipfsError) {
-                            console.error(`Error retrieving IPFS data for doctor ${doctor._id}:`, ipfsError);
-                            // Return with default values if IPFS fails
-                            return {
-                                _id: doctor._id,
-                                fullName: doctor.fullName,
-                                email: doctor.email,
-                                specialization: doctor.specialization || 'Not Available',
-                                experience: doctor.experience !== undefined ? doctor.experience : 0,
-                                availability: doctor.availability || 'Available',
-                                contactnumber: doctor.contactnumber || 'Not Available',
-                                qualification: doctor.qualification || 'MBBS',
-                                address: doctor.address || 'Not provided',
-                                bio: doctor.bio || '',
-                                profileimage: doctor.profileimage || ''
-                            };
-                        }
-                    } else {
-                        // Doctor has all required data in MongoDB
-                        return {
-                            _id: doctor._id,
-                            fullName: doctor.fullName,
-                            email: doctor.email,
-                            specialization: doctor.specialization || 'Not Available',
-                            experience: doctor.experience !== undefined ? doctor.experience : 0,
-                            availability: doctor.availability || 'Available',
-                            contactnumber: doctor.contactnumber || 'Not Available',
-                            qualification: doctor.qualification || 'MBBS',
-                            address: doctor.address || 'Not provided',
-                            bio: doctor.bio || '',
-                            profileimage: doctor.profileimage || ''
-                        };
-                    }
-                } catch (error) {
-                    console.error(`Error processing doctor ${doctor._id}:`, error);
-                    return {
-                        _id: doctor._id,
-                        fullName: doctor.fullName,
-                        email: doctor.email,
-                        specialization: 'Error Loading',
-                        experience: 0,
-                        availability: 'Available',
-                        contactnumber: 'Error Loading',
-                        qualification: 'Error Loading',
-                        address: 'Error Loading',
-                        bio: 'Error Loading',
-                        profileimage: ''
-                    };
-                }
-            }));
+            // Get doctors with pagination
+            const doctors = await doctorManagementService.getDoctors(filters);
+
+            // Apply pagination to the results
+            const paginatedDoctors = doctors.slice(skip, skip + limit);
+
+            console.log(`Returning ${paginatedDoctors.length} doctors for page ${page}`);
 
             return res.status(200).json({
                 success: true,
                 message: "Doctors fetched successfully",
-                count: processedDoctors.length,
-                data: processedDoctors,
+                count: paginatedDoctors.length,
+                data: paginatedDoctors,
                 totalCount,
                 totalPages: Math.ceil(totalCount / limit),
                 page
@@ -347,11 +261,9 @@ module.exports = {
         try {
             const { email } = req.params;
             const updateData = req.body;
-            delete updateData.email; // Prevent email change
+            delete updateData.email;
             let fileInfo = null;
-
-            // Handle file upload if present
-            if (req.file) {
+                if (req.file) {
                 fileInfo = {
                     filename: req.file.filename,
                     path: req.file.path,
@@ -576,8 +488,7 @@ module.exports = {
                 });
             }
 
-            // Create new doctor document with only required fields
-            const newDoctor = {
+                const newDoctor = {
                 _id: signupDoctor._id,
                 doctorId: signupDoctor._id,
                 fullName: signupDoctor.fullName,

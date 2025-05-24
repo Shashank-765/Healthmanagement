@@ -321,6 +321,7 @@ const createdDoctor = {
 const doctorManagementService = {
     getDoctors: async (filters) => {
         try {
+            console.log('Starting getDoctors service with filters:', filters);
             const { specialization, fullName } = filters;
             let query = {};
             if (specialization) {
@@ -329,16 +330,90 @@ const doctorManagementService = {
             if (fullName) {
                 query.fullName = { $regex: new RegExp(fullName, 'i') };
             }
-                const doctors = await adddoctorModel.find(query)
-                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio').sort({createdAt:-1})
+
+            // Fetch all doctors with IPFS references
+            const doctors = await adddoctorModel.find(query)
+                .select('profileimage fullName specialization experience availability contactnumber email qualification address bio ipfsCID ipfsIV')
+                .sort({ createdAt: -1 })
                 .lean();
+
+            console.log(`Found ${doctors.length} doctors in database`);
 
             if (doctors.length === 0) {
                 console.log('No doctors found with the given filters');
                 return [];
             }
 
-         return doctors;
+            // Process each doctor and get data from IPFS
+            const processedDoctors = await Promise.all(doctors.map(async (doctor) => {
+                try {
+                    console.log(`Processing doctor ${doctor._id} with IPFS CID: ${doctor.ipfsCID}`);
+                    
+                    let specialization = doctor.specialization || 'Not Available';
+                    let experience = doctor.experience || 0;
+                    let availability = doctor.availability || 'Available';
+                    let contactnumber = doctor.contactnumber || 'Not Available';
+                    let qualification = doctor.qualification || 'MBBS';
+                    let address = doctor.address || 'Not provided';
+                    let bio = doctor.bio || '';
+
+                    if (doctor.ipfsCID && doctor.ipfsIV) {
+                        try {
+                            console.log(`Attempting to decrypt IPFS data for doctor ${doctor._id}`);
+                            const ipfsData = await IPFSService.retrieveAndDecrypt(
+                                doctor.ipfsCID,
+                                doctor.ipfsIV
+                            );
+                            console.log(`Successfully decrypted IPFS data for doctor ${doctor._id}:`, ipfsData);
+
+                            // Update fields with IPFS data if available
+                            specialization = ipfsData.specialization || specialization;
+                            experience = ipfsData.experience || ipfsData.yearsOfExperience || experience;
+                            availability = ipfsData.availability || availability;
+                            contactnumber = ipfsData.contactnumber || ipfsData.contactNumber || contactnumber;
+                            qualification = ipfsData.qualification || qualification;
+                            address = ipfsData.address || address;
+                            bio = ipfsData.bio || bio;
+                        } catch (ipfsError) {
+                            console.error(`Error retrieving IPFS data for doctor ${doctor._id}:`, ipfsError);
+                        }
+                    } else {
+                        console.log(`No IPFS data found for doctor ${doctor._id}`);
+                    }
+
+                    return {
+                        _id: doctor._id,
+                        fullName: doctor.fullName,
+                        email: doctor.email,
+                        specialization,
+                        experience,
+                        availability,
+                        contactnumber,
+                        qualification,
+                        address,
+                        bio,
+                        profileimage: doctor.profileimage || ''
+                    };
+                } catch (error) {
+                    console.error(`Error processing doctor ${doctor._id}:`, error);
+                    return {
+                        _id: doctor._id,
+                        fullName: doctor.fullName,
+                        email: doctor.email,
+                        specialization: 'Error Loading',
+                        experience: 0,
+                        availability: 'Available',
+                        contactnumber: 'Error Loading',
+                        qualification: 'Error Loading',
+                        address: 'Error Loading',
+                        bio: 'Error Loading',
+                        profileimage: ''
+                    };
+                }
+            }));
+
+            console.log('Successfully processed all doctors');
+            return processedDoctors;
         } catch (error) {
             console.error('Error in getDoctors service:', error);
             throw new Error(`Failed to fetch doctors: ${error.message}`);
@@ -574,7 +649,6 @@ const getDoctorDashboardData = async (doctorEmail) => {
             });
         } catch (error) {
             console.log('Error counting medical history:', error);
-            // If direct query fails, we might need to decrypt IPFS data for medical history too
             totalMedicalHistory = 0;
         }
 

@@ -31,7 +31,7 @@ const medicalHistorySchema = new mongoose.Schema({
     },
     notes: {
         type: String,
-        trim: true
+        trim: true,
     },
     ipfsCID: {
         type: String,
@@ -47,7 +47,8 @@ const medicalHistorySchema = new mongoose.Schema({
     },
     version: {
         type: Number,
-        default: 1
+        default: 1,
+        min: 1
     },
     hl: {
         previousCID: {

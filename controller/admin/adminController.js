@@ -837,6 +837,7 @@ module.exports = {
             const formattedHistory = await Promise.all(medicalHistory.map(async (record) => {
                 let condition = 'No condition specified';
                 let notes = 'No notes available';
+                let fileInfo = null;
 
                 // Try to get condition and notes from IPFS
                 if (record.ipfsCID && record.ipfsIV) {
@@ -849,7 +850,15 @@ module.exports = {
                         
                         condition = ipfsData.condition || 'No condition in IPFS';
                         notes = ipfsData.notes || 'No notes in IPFS';
-                         
+                        
+                        // Add file information if it exists in IPFS data
+                        if (ipfsData.file) {
+                            fileInfo = {
+                                originalName: ipfsData.file.originalName,
+                                mimeType: ipfsData.file.mimeType,
+                                size: ipfsData.file.size
+                            };
+                        }
                     } catch (ipfsError) {
                             // Fallback to MongoDB data if available
                         condition = record.condition || 'IPFS error - no MongoDB condition';
@@ -863,14 +872,18 @@ module.exports = {
 
                 return {
                     _id: record._id,
-                    doctorName: record.doctorId?.fullName || 'Unknown Doctor',
+                    doctorName: record.doctorId?.fullName || 'Self',
                     condition: condition,
                     notes: notes,
                     date: record.date || new Date(),
                     createdAt: record.createdAt,
-                    updatedAt: record.updatedAt
+                    updatedAt: record.updatedAt,
+                    fileInfo: fileInfo, // Include file information in the response
+                    ipfsData: {
+                        cid: record.ipfsCID,
+                        iv: record.ipfsIV
+                    }
                 };
-                return formattedRecord;
             }));
 
             res.status(200).json({
