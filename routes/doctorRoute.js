@@ -19,5 +19,7 @@ router.post('/assign-patient',authenticateToken,doctorController.assignPatientTo
 router.get('/dashboard/:doctorEmail', authenticateToken,doctorController.getDoctorDashboard);
 router.post('/add-appointment',authenticateToken,doctorController.addAppointmentToDoctor);
 router.get('/readdoctorstransfer/:email',authenticateToken,doctorController.readDoctorsByEmail);
+router.get('/reviewsummary', authenticateToken, doctorController.getReviewsSummary);
+router.post('/rate-doctor', authenticateToken, doctorController.rateDoctor);
 
 module.exports = router;

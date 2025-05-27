@@ -535,8 +535,7 @@ const patientService = {
 
                         // Check if IPFS data exists
                         if (!app.ipfsCID || !app.ipfsIV) {
-                            console.log(`Appointment ${app._id} missing IPFS data`);
-                            return {
+                                 return {
                                 _id: app._id,
                                 doctorName: app.doctorId?.fullName || 'N/A',
                                 doctorSpecialization: app.doctorId?.specialization || 'N/A',

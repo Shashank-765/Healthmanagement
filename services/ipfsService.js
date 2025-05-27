@@ -9,10 +9,7 @@ class IPFSService {
 
     async uploadEncryptedData(data) {
         try {
-            // Encrypt data
             const encrypted = await encryptionService.encrypt(data);
-
-            // Upload to IPFS
             const { cid } = await this.ipfs.add(JSON.stringify(encrypted));
 
             return {
@@ -29,10 +26,8 @@ class IPFSService {
         try {
             // Check if CID is valid
             if (!cid || cid === 'defaultCID' || cid === '') {
-                return {}; // Return empty object for new/uninitialized collections
+                return {};
             }
-
-            // Get from IPFS
             try {
                 const stream = this.ipfs.cat(cid);
                 let chunks = [];
@@ -42,8 +37,8 @@ class IPFSService {
                 
                 const encryptedData = Buffer.concat(chunks).toString();
                 const parsed = JSON.parse(encryptedData);
-                
-                // Decrypt
+        
+
                 return await encryptionService.decrypt(parsed.encryptedData, iv);
             } catch (fetchError) {
                 console.error('IPFS data fetch error:', fetchError);

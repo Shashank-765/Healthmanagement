@@ -4,8 +4,6 @@ const patientController = require('../controller/patient/patientController');
 const upload = require('../utils/multer');
 // const authMiddleware = require('../middleware/auth');
 const { authenticateToken } = require('../middleware/middleware');
-
-// Error handling middleware for multer
 const handleMulterError = (err, req, res, next) => {
     if (err) {
         console.error('Multer error:', err);
@@ -34,9 +32,7 @@ router.post('/patientlogin', patientController.patientLogin);
 
 // Protected routes
 router.get('/patient-dashboard', authenticateToken, patientController.getPatientDashboard);
-
 router.get('/sensitive-data/:cid', authenticateToken, patientController.getSensitiveData);
-
 router.post('/addpatient', 
     upload.single('profileimage'),
     handleMulterError,

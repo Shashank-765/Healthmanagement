@@ -35,7 +35,7 @@ module.exports = {
 
             // Validate and process doctor data
             const validatedData = await doctorSignupService.validateDoctorData(req.body);
-            
+
             // Create doctor with sensitive data in IPFS
             const doctor = await doctorSignupService.createDoctor(validatedData);
 
@@ -64,9 +64,9 @@ module.exports = {
                 }
             }
 
-            const statusCode = error.message.includes("required") || 
-                             error.message.includes("exists") || 
-                             error.message.includes("valid") ? 400 : 500;
+            const statusCode = error.message.includes("required") ||
+                error.message.includes("exists") ||
+                error.message.includes("valid") ? 400 : 500;
 
             res.status(statusCode).json({
                 statusCode,
@@ -88,10 +88,10 @@ module.exports = {
 
             // Validate login credentials
             const doctor = await doctorLoginService.validateLogin(email, password);
-            
+
             // Generate token
             const token = jwt.sign(
-                { 
+                {
                     id: doctor._id,
                     role: 'doctor'
                 },
@@ -151,7 +151,7 @@ module.exports = {
             const userRole = decoded.role;
 
             const doctorData = req.body;
-            
+
             // Handle file upload if present
             let fileInfo = null;
             if (req.file) {
@@ -163,7 +163,7 @@ module.exports = {
                 };
                 doctorData.profileimage = req.file.path;
             }
-            
+
             // Validate and process data using service with user role
             const validatedData = await createdDoctor.validateDoctorData(doctorData, userRole);
             const newDoctor = await createdDoctor.saveDoctor(validatedData);
@@ -192,16 +192,16 @@ module.exports = {
             }
 
             console.log("Error in createDoctor:", error);
-            
+
             // Handle specific error cases
             let statusCode = 500;
             if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
                 statusCode = 401;
             } else if (error.message.includes("must be signed up first")) {
                 statusCode = 403;
-            } else if (error.message.includes("already exists") || 
-                      error.message.includes("Missing required fields") ||
-                      error.message.includes("10 digits")) {
+            } else if (error.message.includes("already exists") ||
+                error.message.includes("Missing required fields") ||
+                error.message.includes("10 digits")) {
                 statusCode = 400;
             }
 
@@ -263,7 +263,7 @@ module.exports = {
             const updateData = req.body;
             delete updateData.email;
             let fileInfo = null;
-                if (req.file) {
+            if (req.file) {
                 fileInfo = {
                     filename: req.file.filename,
                     path: req.file.path,
@@ -330,9 +330,9 @@ module.exports = {
     assignPatientToDoctor: async (req, res) => {
         try {
             const { doctorId, patientId } = req.body;
-            
+
             const result = await doctorManagementService.addPatientToDoctor(doctorId, patientId);
-            
+
             res.status(200).json(result);
         } catch (error) {
             res.status(500).json({
@@ -390,7 +390,7 @@ module.exports = {
             const dashboardData = await getDoctorDashboardData(doctorEmail || req.user.email);
             res.status(200).json(dashboardData);
         } catch (error) {
-    // Handle specific MongoDB ObjectId casting error
+            // Handle specific MongoDB ObjectId casting error
             if (error.name === 'CastError' && error.kind === 'ObjectId') {
                 return res.status(400).json({
                     success: false,
@@ -407,9 +407,9 @@ module.exports = {
     addAppointmentToDoctor: async (req, res) => {
         try {
             const { doctorId, appointmentId } = req.body;
-            
+
             const result = await doctorManagementService.addAppointmentToDoctor(doctorId, appointmentId);
-            
+
             res.status(200).json(result);
         } catch (error) {
             res.status(500).json({
@@ -424,7 +424,7 @@ module.exports = {
             const { email } = req.params;
 
             // First check in signup collection
-            const signupDoctor = await doctorSignup.findOne({ email }); 
+            const signupDoctor = await doctorSignup.findOne({ email });
             const existingAddDoctor = await adddoctorModel.findOne({ email });
             if (!signupDoctor) {
                 return res.status(404).json({
@@ -440,8 +440,8 @@ module.exports = {
                     const ipfsResponse = await IPFSService.retrieveAndDecrypt(
                         signupDoctor.ipfsCID,
                         signupDoctor.ipfsIV
-                    ); 
-                    const ipfsSpecialization = ipfsResponse.sensitiveData?.specialization || ipfsResponse.specialization;       
+                    );
+                    const ipfsSpecialization = ipfsResponse.sensitiveData?.specialization || ipfsResponse.specialization;
                     if (ipfsSpecialization) {
                         const validSpecializations = [
                             'Cardiologist',
@@ -480,7 +480,7 @@ module.exports = {
                     updateObj,
                     { new: true }
                 );
-                
+
                 return res.status(200).json({
                     success: true,
                     message: "Doctor data updated successfully",
@@ -488,7 +488,7 @@ module.exports = {
                 });
             }
 
-                const newDoctor = {
+            const newDoctor = {
                 _id: signupDoctor._id,
                 doctorId: signupDoctor._id,
                 fullName: signupDoctor.fullName,
@@ -510,6 +510,134 @@ module.exports = {
                 message: error.message,
                 stack: error.stack
             });
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    },
+    rateDoctor: async (req, res) => {
+        try {
+            const { doctorName, rating, comment } = req.body;
+            const patient_id = req.user && req.user.id;
+
+            if (!doctorName || !rating || !patient_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: "doctorName, rating, and patient_id are required"
+                });
+            }
+
+            // Find doctor by name (case-insensitive, and ideally unique)
+            const doctor = await adddoctorModel.findOne({ fullName: doctorName });
+            if (!doctor) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Doctor not found"
+                });
+            }
+            const doctorId = doctor._id;
+            const ratingExist = doctor.ratings.some(r => r.patient_id?.toString() === patient_id.toString());
+
+            if (ratingExist) {
+                return res.status(400).json({
+                    success: false,
+                    message: "You have already rated this doctor"
+                });
+            }
+
+            const ratingObj = {
+                rating: Number(rating),
+                comment: comment || "",
+                date: new Date(),
+                patient_id
+            };
+            const ipfsResult = await IPFSService.uploadEncryptedData(ratingObj);
+            if (!ipfsResult || !ipfsResult.cid) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Failed to upload rating to IPFS"
+                });
+            }
+               const ratingRef = {
+                ipfsCID: ipfsResult.cid,
+                ipfsIV: ipfsResult.iv || "",
+                patient_id: patient_id,
+            };
+
+            const updatedDoctor = await adddoctorModel.findByIdAndUpdate(
+                doctorId,
+                { $push: { ratings: ratingRef } },
+                { new: true, runValidators: true }
+            );
+
+            if (!updatedDoctor) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Doctor not found"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Rating submitted successfully",
+                data: updatedDoctor
+            });
+        } catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    },
+    getReviewsSummary: async (req, res) => {
+        try {
+            const doctorEmail = req.query?.doctorEmail || req.user?.email;
+            if (!doctorEmail) {
+                return res.status(400).json({
+                    success:false,
+                    message:"Doctor email is required"
+                })
+            }
+            const doctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+            if (!doctor) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Doctor not found"
+                });
+            }
+
+            // Fetch and decrypt all ratings from IPFS
+            let ratings = [];
+            for (const r of doctor.ratings) {
+                try {
+  const decrypted = await IPFSService.retrieveAndDecrypt(r.ipfsCID, r.ipfsIV);
+                    if (decrypted && decrypted.rating) {
+                        ratings.push(Number(decrypted.rating));
+                    }
+                } catch (err) {
+   continue;
+                }
+            }
+
+            const ratingsCount = ratings.length;
+            const averageRating = ratingsCount > 0
+                ? (ratings.reduce((acc, val) => acc + val, 0) / ratingsCount).toFixed(1)
+                : "0.0";
+
+            const reviewSummary = {
+                totalRatings: ratingsCount,
+                averageRating,
+                ratingsCount: doctor.ratings.length // total ratings stored (could be more than decrypted if some fail)
+            };
+
+            return res.status(200).json({
+                success: true,
+                message: "Review summary fetched successfully",
+                data: reviewSummary
+            });
+        } catch (error) {
+            console.log("error", error.message);
             return res.status(500).json({
                 success: false,
                 message: error.message || "Internal server error"

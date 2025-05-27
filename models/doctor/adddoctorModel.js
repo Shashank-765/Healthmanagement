@@ -46,13 +46,21 @@ const adddoctorSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Appointment'
     }],
+    ratings: [
+        {
+            rating: { type: Number, min: 1, max: 5 },
+            comment: { type: String },
+            date: { type: Date, default: Date.now },
+            patient_id: { type: mongoose.Schema.Types.ObjectId, ref: 'AddPatient', required: true },
+            ipfsCID: { type: String },
+            ipfsIV: { type: String }
+        }
+    ],
     lastLoginAt: {
         type: Date,
         default: Date.now
     }
 }, { timestamps: true, versionKey: false });
-
-// Add pre-save middleware to ensure doctorId is set
 adddoctorSchema.pre('save', function(next) {
     if (!this.doctorId) {
         this.doctorId = this._id;

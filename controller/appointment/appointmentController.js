@@ -462,8 +462,7 @@ const appointmentController = {
 
                     // Check if IPFS data exists
                     if (!appointment.ipfsCID || !appointment.ipfsIV) {
-                        console.log(`Missing IPFS data for appointment ${appointment._id}`);
-                        return {
+                            return {
                             _id: appointment._id,
                             patientName: appointment.patientId?.fullName || 'N/A',
                             email: appointment.patientId?.email || 'N/A',
