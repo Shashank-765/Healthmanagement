@@ -6,10 +6,10 @@ const IPFSService = require('../../services/ipfsService');
 const mongoose = require('mongoose');
 const appointmentController = {
     createAppointment: async (req, res) => {
+       let appointmentResult = null;
         try {
             const { department, doctorId, appointmentDate, appointmentTime, reason } = req.body;
             const patientEmail = req.user.email.toLowerCase();  
-
             const patient = await addpatientModel.findOne({ email: patientEmail });
             if (!patient) {
                 return res.status(404).json({
@@ -17,87 +17,238 @@ const appointmentController = {
                     message: 'Patient not found',
                 });
             }
-
-            // Prepare appointment data
-            const appointmentData = {
-                patientId: patient._id,
-                department,
-                doctorId,
-                appointmentDate,
-                appointmentTime,
-                reason
-            };
-            console.log('[DEBUG] Appointment data to be sent to service:', appointmentData);
-
-            const result = await appointmentService.createAppointment(appointmentData);
-            console.log('[DEBUG] Result from appointmentService.createAppointment:', result);
-
-            // Create notification
-            if (result.success) {
-                try {
-                    console.log('[DEBUG] Looking for doctor with ID:', doctorId);
-                    const doctor = await adddoctorModel.findById(doctorId);
-
-                    if (doctor) {
-                        console.log('[DEBUG] Doctor found:', doctor._id);
-                        await notificationController.createAppointmentNotificationInternal({
-                            doctorId: doctor._id,
-                            patientId: patient._id,
-                            appointmentId: result.data.appointmentId,
-                            patientName: patient.fullName
-                        });
-                        console.log('[DEBUG] Notification creation result:', notification);
-                    } else {
-                        console.error('[ERROR] Doctor not found with ID:', doctorId);
+            if (!department || !doctorId || !appointmentDate || !appointmentTime || !reason) {
+                console.log('4.1 Validation failed - missing required fields');
+                return res.status(400).json({
+                    success: false,
+                    message: 'All fields are required: department, doctorId, appointmentDate, appointmentTime, reason'
+                });
+            }
+            const timeMatch = appointmentTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)$/);
+            if (!timeMatch) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'appointmentTime must be in the format "HH:MM AM/PM" (e.g., "10:30 AM")'
+                });
+            }
+            const [, rawHours, rawMinutes, rawPeriod] = timeMatch;
+            const formattedTime = `${rawHours.padStart(2, '0')}:${rawMinutes} ${rawPeriod.toUpperCase()}`;
+            const appointmentDateObj = new Date(appointmentDate);
+            if (isNaN(appointmentDateObj.getTime())) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid appointment date format. Please use YYYY-MM-DD format.'
+                });
+            }
+            const doctor = await adddoctorModel.findOne({
+                _id: doctorId,
+                specialization: department
+            });
+            
+            if (!doctor) {
+                console.log('7.1 Doctor not found or department mismatch');
+                return res.status(404).json({
+                    success: false,
+                    message: "Doctor not found or does not belong to selected department"
+                });
+            }
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            if (appointmentDateObj < today) {
+                console.log('8.1 Appointment date is in the past');
+                return res.status(400).json({
+                    success: false,
+                    message: "Appointment date cannot be in the past"
+                });
+            }
+            const existingAppointment = await appointmentModel.findOne({
+                $or: [
+                    {
+                        doctorId: doctor._id,
+                        appointmentDate: appointmentDate,
+                        appointmentTime: formattedTime,
+                        status: { $ne: 'cancelled' }
+                    },
+                    {
+                        patientId: patient._id,
+                        appointmentDate: appointmentDate,
+                        appointmentTime: formattedTime,
+                        status: { $ne: 'cancelled' }
                     }
-                } catch (notificationError) {
-                    console.error('[ERROR] Exception while creating notification:', notificationError);
+                ]
+            });
+
+            if (existingAppointment) {
+                if (existingAppointment.doctorId.toString() === doctor._id.toString()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "This time slot is already booked by another patient. Please select another time."
+                    });
+                } else {
+                    return res.status(400).json({
+                        success: false,
+                        message: "You already have an appointment at this time. Please select another time."
+                    });
                 }
-            } else {
-                console.error('[ERROR] Appointment creation failed:', result);
+            }
+            // Create the sensitive data object
+            const sensitiveData = {
+                reason: req.body.reason,
+                status: 'pending',
+                department: req.body.department,
+                appointmentDate: appointmentDate,
+                appointmentTime: formattedTime,
+                createdAt: new Date().toISOString()
+            };
+            const appointment = new appointmentModel({
+                patientId: patient._id,
+                doctorId: doctor._id,
+                status: 'pending'
+            });
+
+            // Save appointment first
+            await appointment.save();
+            // Then handle IPFS upload
+        try {
+                const { cid, iv } = await IPFSService.uploadEncryptedData(sensitiveData);
+
+
+                // Update appointment with IPFS data
+                appointment.ipfsCID = cid;
+                appointment.ipfsIV = iv;
+                await appointment.save();
+            } catch (ipfsError) {
+                // If IPFS fails, we still have the appointment record
+                // We can handle this gracefully
             }
 
-            res.status(201).json(result);
-            console.log('[DEBUG] Appointment creation response sent to client.');
+            await addpatientModel.findByIdAndUpdate(patient._id, {
+                $push: { appointments: appointment._id }
+            });
+            await adddoctorModel.findByIdAndUpdate(doctor._id, {
+                $push: { appointments: appointment._id }
+            });
+            res.status(201).json({
+                success: true,
+                message: "Appointment created successfully",
+                data: {
+                    appointmentId: appointment._id,
+                    patientName: patient.fullName,
+                    doctorName: doctor.fullName,
+                    appointmentDate: appointmentDate,
+                    appointmentTime: formattedTime,
+                    status: 'pending'
+                }
+            });
         } catch (error) {
-            console.error('[ERROR] Exception in createAppointment:', error);
-            res.status(500).json({
+            console.error('18. Error in createAppointment:', error);
+            
+            // If we have a partial result, try to clean up
+            if (appointmentResult && appointmentResult.data && appointmentResult.data.appointmentId) {
+                console.log('18.1 Attempting to clean up partial appointment');
+                try {
+                    await appointmentModel.findByIdAndDelete(appointmentResult.data.appointmentId);
+                    console.log('18.2 Cleanup successful');
+                } catch (cleanupError) {
+                    console.error('18.3 Cleanup failed:', cleanupError);
+                }
+            }
+
+            console.log('18.4 Sending error response');
+            return res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to create appointment'
             });
         }
     },
-
     getPatientAppointmentsByName: async (req, res) => {
         try {
-       const patientEmail = req.user.email.toLowerCase();  
+            console.log('1. Starting getPatientAppointmentsByName');
+            const patientEmail = req.user.email.toLowerCase();  
+            console.log('2. Patient email:', patientEmail);
+
             // Find patient in addpatientModel using email
             const patient = await addpatientModel.findOne({ 
                 email: patientEmail 
             });
             
             if (!patient) {
-            return res.status(404).json({
+                console.log('3. Patient not found');
+                return res.status(404).json({
                     success: false,
                     message: "Patient not found"
                 });
             }
-            
+            console.log('4. Patient found:', patient._id);
+       
             const patientId = patient._id;
            
             // Get appointments with populated doctor info
             const appointments = await appointmentModel.find({ patientId })
                 .populate('doctorId', 'fullName specialization')
                 .sort({ createdAt: -1 });
-            // Get IPFS data for each appointment
-            const appointmentsWithDetails = await Promise.all(appointments.map(async (appointment) => {
-                try {
-                    // Get sensitive data from IPFS
-                    const sensitiveData = await IPFSService.retrieveAndDecrypt(
-                        appointment.ipfsCID,
-                        appointment.ipfsIV
-                    );
 
+            console.log('5. Found appointments:', appointments.length);
+
+            // Get IPFS data for each appointment
+            const appointmentsWithDetails = await Promise.all(appointments.map(async (appointment, index) => {
+                try {
+                    console.log(`6. Processing appointment ${index + 1}:`, {
+                        id: appointment._id,
+                        mongoStatus: appointment.status,
+                        hasIPFS: !!(appointment.ipfsCID && appointment.ipfsIV)
+                    });
+
+                    // Get sensitive data from IPFS
+                    let sensitiveData = {};
+                    if (appointment.ipfsCID && appointment.ipfsIV) {
+                        console.log(`6.1 Retrieving IPFS data for appointment ${index + 1}`);
+                        sensitiveData = await IPFSService.retrieveAndDecrypt(
+                            appointment.ipfsCID,
+                            appointment.ipfsIV
+                        );
+                        console.log('6.2 IPFS data retrieved:', {
+                            date: sensitiveData.appointmentDate,
+                            time: sensitiveData.appointmentTime,
+                            department: sensitiveData.department,
+                            reason: sensitiveData.reason
+                        });
+                    }
+
+                    // Format the date and time
+                    const formattedDate = sensitiveData.appointmentDate ? new Date(sensitiveData.appointmentDate).toLocaleDateString() : 'N/A';
+                    const formattedTime = sensitiveData.appointmentTime || 'N/A';
+
+                    const appointmentData = {
+                        _id: appointment._id,
+                        doctor: {
+                            id: appointment.doctorId._id,
+                            name: appointment.doctorId.fullName,
+                            specialization: appointment.doctorId.specialization
+                        },
+                        appointmentDate: sensitiveData.appointmentDate || appointment.appointmentDate,
+                        formattedDate: formattedDate,
+                        appointmentTime: sensitiveData.appointmentTime || appointment.appointmentTime,
+                        formattedTime: formattedTime,
+                        department: sensitiveData.department || appointment.doctorId.specialization || 'N/A',
+                        reason: sensitiveData.reason || 'N/A',
+                        status: appointment.status, // Always use MongoDB status
+                        createdAt: appointment.createdAt,
+                        updatedAt: appointment.updatedAt
+                    };
+
+                    console.log(`6.3 Processed appointment ${index + 1}:`, {
+                        id: appointmentData._id,
+                        status: appointmentData.status,
+                        date: appointmentData.appointmentDate,
+                        time: appointmentData.appointmentTime
+                    });
+
+                    return appointmentData;
+
+                } catch (error) {
+                    console.error(`7. Error processing appointment ${index + 1}:`, error);
                     return {
                         _id: appointment._id,
                         doctor: {
@@ -105,28 +256,25 @@ const appointmentController = {
                             name: appointment.doctorId.fullName,
                             specialization: appointment.doctorId.specialization
                         },
-                        appointmentDate: sensitiveData.appointmentDate,
-                        appointmentTime: sensitiveData.appointmentTime,
-                        department: sensitiveData.department,
-                        reason: sensitiveData.reason,
-                        status: sensitiveData.status,
+                        appointmentDate: appointment.appointmentDate || 'N/A',
+                        formattedDate: appointment.appointmentDate ? new Date(appointment.appointmentDate).toLocaleDateString() : 'N/A',
+                        appointmentTime: appointment.appointmentTime || 'N/A',
+                        formattedTime: appointment.appointmentTime || 'N/A',
+                        department: appointment.doctorId.specialization || 'N/A',
+                        reason: 'N/A',
+                        status: appointment.status, // Always use MongoDB status
                         createdAt: appointment.createdAt,
                         updatedAt: appointment.updatedAt
-                    };
-                } catch (error) {
-                      return {
-                        _id: appointment._id,
-                        doctor: {
-                            id: appointment.doctorId._id,
-                            name: appointment.doctorId.fullName,
-                            specialization: appointment.doctorId.specialization
-                        },
-                        error: 'Failed to retrieve appointment details'
                     };
                 }
             }));
 
-            // Return 200 with empty array if no appointments found
+            console.log('8. Final processed appointments:', {
+                count: appointmentsWithDetails.length,
+                statuses: appointmentsWithDetails.map(apt => apt.status)
+            });
+            
+
             res.status(200).json({
                 success: true,
                 message: appointmentsWithDetails.length === 0 ? "No appointments found for this patient" : "Appointments fetched successfully",
@@ -134,7 +282,8 @@ const appointmentController = {
                 data: appointmentsWithDetails
             });
         } catch (error) {
-           res.status(500).json({
+            console.error('9. Error in getPatientAppointmentsByName:', error);
+            res.status(500).json({
                 success: false,
                 message: error.message || "Failed to fetch appointments"
             });
@@ -482,6 +631,16 @@ const appointmentController = {
                         appointment.ipfsCID,
                         appointment.ipfsIV
                     );
+                    
+                    console.log('6.2 IPFS data retrieved:', {
+                        appointmentId: appointment._id,
+                        date: sensitiveData.appointmentDate,
+                        time: sensitiveData.appointmentTime,
+                        department: sensitiveData.department,
+                        reason: sensitiveData.reason,
+                        fullData: JSON.stringify(sensitiveData, null, 2)
+                    });
+
                     return {
                         _id: appointment._id,
                         patientName: appointment.patientId?.fullName || 'N/A',

@@ -519,78 +519,81 @@ const patientService = {
         }
     },
 
-    getPatientDashboardData: async (patientId) => {
+    getPatientDashboardData: async (patientEmail) => {
         try {
-            // Get all appointments for the patient, sorted by most recent
-            const appointments = await appointmentModel.find({ patientId })
-                .populate('doctorId', 'fullName specialization email experience availability profileimage')
-                .sort({ createdAt: -1 });
-            // Total appointments
-            const totalAppointments = appointments.length;
+            // First find in addpatientModel
+            const hospitalPatient = await addpatientModel.findOne({ 
+                email: patientEmail.toLowerCase().trim() 
+            });
+            
+            // If not found, find in patientSignup
+            const signupPatient = await patientSignup.findOne({ 
+                email: patientEmail.toLowerCase().trim() 
+            });
 
-            // Get recent appointments with IPFS data
+            if (!hospitalPatient && !signupPatient) {
+                throw new Error("Patient not found");
+            }
+
+            // Use the correct patient ID - prefer hospitalPatient if exists
+            const patientId = hospitalPatient ? hospitalPatient._id : signupPatient._id;
+            const signupId = hospitalPatient ? hospitalPatient.patientId : signupPatient._id;
+
+            // Get all appointments for this patient using both IDs
+            const appointments = await appointmentModel.find({
+                $or: [
+                    { patientId: patientId },
+                    { patientId: signupId }
+                ]
+            })
+            .populate('doctorId', 'fullName specialization email experience availability profileimage')
+            .sort({ createdAt: -1 });
+
+            // Process appointments in real-time
             const recentAppointments = await Promise.all(
-                appointments.slice(0, 4).map(async (app, index) => {
-                    try {
-
-                        // Check if IPFS data exists
-                        if (!app.ipfsCID || !app.ipfsIV) {
-                                 return {
-                                _id: app._id,
-                                doctorName: app.doctorId?.fullName || 'N/A',
-                                doctorSpecialization: app.doctorId?.specialization || 'N/A',
-                                appointmentDate: 'No IPFS Data',
-                                appointmentTime: 'No IPFS Data',
-                                department: 'N/A',
-                                status: 'pending',
-                                reason: 'Missing IPFS CID/IV'
-                            };
-                        }
-
-                        // Retrieve IPFS data for each appointment
+                appointments.slice(0, 4).map(async (app) => {
+                    if (app.ipfsCID && app.ipfsIV) {
                         const ipfsData = await IPFSService.retrieveAndDecrypt(
                             app.ipfsCID,
                             app.ipfsIV
-                        ); 
+                        );
                         return {
                             _id: app._id,
-                            doctorName: app.doctorId?.fullName || 'N/A',
-                            doctorSpecialization: app.doctorId?.specialization || 'N/A',
-                            appointmentDate: ipfsData.appointmentDate || 'Not Available',
-                            appointmentTime: ipfsData.appointmentTime || 'Not Available',
-                            department: ipfsData.department || 'N/A',
-                            status: ipfsData.status || 'pending',
-                            reason: ipfsData.reason || 'N/A'
-                        };
-                    } catch (error) {
-                        console.error(`Error retrieving IPFS data for appointment ${app._id}:`, error);
-                        return {
-                            _id: app._id,
-                            doctorName: app.doctorId?.fullName || 'N/A',
-                            doctorSpecialization: app.doctorId?.specialization || 'N/A',
-                            appointmentDate: 'Error Loading',
-                            appointmentTime: 'Error Loading',
-                            department: 'N/A',
-                            status: 'pending',
-                            reason: `Error: ${error.message}`
+                            doctorName: app.doctorId?.fullName,
+                            appointmentDate: ipfsData.appointmentDate,
+                            appointmentTime: ipfsData.appointmentTime,
+                            status: ipfsData.status
                         };
                     }
+                    return null;
                 })
             );
-           // Primary doctor (from most recent appointment)
-            const primaryDoctor = appointments[0]?.doctorId || null;
 
-            // Dynamic medical records count
-            const medicalRecords = await medicalHistoryModel.countDocuments({ patientId });
-            
+            // Get medical records using both IDs
+            const medicalRecords = await medicalHistoryModel.countDocuments({
+                $or: [
+                    { patientId: patientId },
+                    { patientId: signupId }
+                ]
+            });
+
             return {
-                totalAppointments,
-                medicalRecords,
-                recentAppointments,
-                primaryDoctor
+                success: true,
+                data: {
+                    totalAppointments: appointments.length,
+                    medicalRecords: medicalRecords,
+                    recentAppointments: recentAppointments.filter(Boolean),
+                    primaryDoctor: appointments[0]?.doctorId || null,
+                    patientInfo: {
+                        id: patientId,
+                        signupId: signupId,
+                        fullName: hospitalPatient?.fullName || signupPatient?.fullName,
+                        email: patientEmail
+                    }
+                }
             };
         } catch (error) {
-            console.error("Error in getPatientDashboardData:", error);
+            console.error('Error in getPatientDashboardData:', error);
             throw error;
         }
     }

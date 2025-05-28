@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const patientController = require('../controller/patient/patientController');
 const upload = require('../utils/multer');
-// const authMiddleware = require('../middleware/auth');
 const { authenticateToken } = require('../middleware/middleware');
 const handleMulterError = (err, req, res, next) => {
     if (err) {
@@ -47,13 +46,11 @@ router.get('/allpatientdata', patientController.readAllpatientdata);
 router.get('/patientdata/:fullName', patientController.readpatientdataByName);
 router.put('/update/:fullName', patientController.updatePatientData);
 router.delete('/delete-patientdata/:fullName', patientController.deletePatientData);
-
-// Add these new routes while kaeeping existing ones
 router.post('/assign-primary-doctor', patientController.assignPrimaryDoctor);
 router.get('/patient-dashboard',authenticateToken, patientController.getPatientDashboard);
-// router.post('/add-appointment', patientController.addAppointmentToPatient);
 // router.get('/sensitive-data/:cid', patientController.getPatientSensitiveData);
 router.get('/transfer-patient/:email', authenticateToken, patientController.transferPatientByEmail);
 //profile view
 router.get('/profile-view', authenticateToken, patientController.profileview);
+router.put('/update-emergency-contact', authenticateToken, patientController.updateEmergencyContact);
 module.exports = router;

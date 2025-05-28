@@ -261,41 +261,24 @@ module.exports = {
         try {
             const { email } = req.params;
             const updateData = req.body;
-            delete updateData.email;
-            let fileInfo = null;
-            if (req.file) {
-                fileInfo = {
-                    filename: req.file.filename,
-                    path: req.file.path,
-                    mimetype: req.file.mimetype,
-                    size: req.file.size
-                };
-                updateData.profileimage = req.file.path;
-            }
+            
+            console.log('Update request for email:', email);
+            console.log('Update data:', updateData);
 
+            // Call the service with the email and update data
             const updatedDoctor = await doctorManagementService.updateDoctor(email, updateData);
 
             return res.status(200).json({
                 success: true,
                 message: "Doctor updated successfully",
-                data: {
-                    doctor: updatedDoctor,
-                    fileInfo
-                }
+                data: updatedDoctor
             });
+
         } catch (error) {
-            // Clean up uploaded file if there was an error
-            if (req.file) {
-                try {
-                    fs.unlinkSync(req.file.path);
-                } catch (err) {
-                    console.error("Error deleting file:", err);
-                }
-            }
-            const statusCode = error.message.includes("not found") ? 404 : 500;
-            return res.status(statusCode).json({
+            console.error('Error in updateDoctor controller:', error);
+            return res.status(404).json({
                 success: false,
-                message: error.message || "Internal server error"
+                message: error.message || "Doctor not found"
             });
         }
     },
@@ -403,6 +386,7 @@ module.exports = {
             });
         }
     },
+
 
     addAppointmentToDoctor: async (req, res) => {
         try {
@@ -606,12 +590,10 @@ module.exports = {
                     message: "Doctor not found"
                 });
             }
-
-            // Fetch and decrypt all ratings from IPFS
             let ratings = [];
             for (const r of doctor.ratings) {
                 try {
-  const decrypted = await IPFSService.retrieveAndDecrypt(r.ipfsCID, r.ipfsIV);
+                const decrypted = await IPFSService.retrieveAndDecrypt(r.ipfsCID, r.ipfsIV);
                     if (decrypted && decrypted.rating) {
                         ratings.push(Number(decrypted.rating));
                     }

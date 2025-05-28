@@ -1,0 +1,14 @@
+{
+  "ignore": [
+    "server/data/*",
+    "server/data/**/*",
+    "*.json",
+    "node_modules/**/node_modules"
+  ],
+  "delay": "1000",
+  "watch": [
+    "server/**/*.js",
+    "index.js"
+  ],
+  "ext": "js"
+} 

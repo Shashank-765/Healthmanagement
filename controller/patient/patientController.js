@@ -10,6 +10,7 @@ const patientSensitiveDataService = require('../../services/patientSensitiveData
 const addpatientModel = require('../../models/patient/addpatientModel');
 const jwt = require('jsonwebtoken');
 const getPatientSensitiveData = require('../../services/patientSensitiveDataService');
+const adddoctor = require('../../models/doctor/adddoctorModel');
 
 module.exports = {
     patientSignup: async (req, res) => {
@@ -366,18 +367,47 @@ const loginData = {
     }, 
     getPatientDashboard: async (req, res) => {
         try {
-            const patientId = req.user.id;
-            const dashboardData = await patientService.getPatientDashboardData(patientId);
+            const patientEmail = req.params.patientEmail || req.user?.email;
+            
+            if (!patientEmail) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Patient email is required"
+                });
+            }
 
-            res.status(200).json({
-                success: true,
-                message: "Patient dashboard data fetched successfully",
-                data: dashboardData
+            // Get patient data from both collections
+            const hospitalPatient = await addpatientModel.findOne({ 
+                email: patientEmail.toLowerCase().trim() 
             });
+            
+            const signupPatient = await patientSignup.findOne({ 
+                email: patientEmail.toLowerCase().trim() 
+            });
+
+            if (!hospitalPatient && !signupPatient) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Patient not found"
+                });
+            }
+
+            const dashboardData = await patientService.getPatientDashboardData(patientEmail);
+            
+            // Add additional patient info to the response
+            dashboardData.data.patientInfo = {
+                ...dashboardData.data.patientInfo,
+                emergencyContact: hospitalPatient?.emergencyContact?.[0] || '',
+                emergencyContacts: hospitalPatient?.emergencyContact || [],
+                isHospitalPatient: !!hospitalPatient
+            };
+
+            res.status(200).json(dashboardData);
         } catch (error) {
+            console.error('Error in getPatientDashboard:', error);
             res.status(500).json({
                 success: false,
-                message: error.message || "Failed to fetch dashboard data"
+                message: error.message || "Internal server error"
             });
         }
     },
@@ -490,10 +520,10 @@ const loginData = {
     },
     profileview: async (req, res) => {
         try {
-            console.log('Profile View Request - User Data:', req.user);
-            const { role, id } = req.user;
+          const { role, id } = req.user;
             let userData;
             let ipfsData;
+            let doctorData;
 
             if (!id) {
                 console.error('No user ID found in request');
@@ -544,7 +574,8 @@ const loginData = {
 
                 // Get date of birth from either model or IPFS data
                 const dateOfBirth = userData.dateOfBirth || ipfsData?.dateOfBirth;
-
+   userDatapatient = await addpatientModel.findById(id);
+                patientData = await addpatientModel.findOne({ doctorId: id });
                 return res.status(200).json({
                     success: true,
                     message: "Patient profile data fetched successfully",
@@ -553,55 +584,53 @@ const loginData = {
                         age: dateOfBirth ? calculateAge(dateOfBirth) : null,
                         contact: contactNumber,
                         email: userData.email,
-                        bloodGroup: ipfsData?.bloodGroup || null
+                        bloodGroup: ipfsData?.bloodGroup || null,
+                        emergencyContact: userData.emergencyContact?.[0] || '',
+                        emergencyContacts: userData.emergencyContact || []
                     }
                 });
             } else if (role === 'doctor') {
                 // Fetch doctor data
                 console.log('Fetching doctor data for ID:', id);
                 userData = await doctorSignup.findById(id);
+                doctorData = await adddoctor.findOne({ doctorId: id });
                 
-                if (!userData) {
-                    console.error('Doctor not found');
+                if (!userData && !doctorData) {
+                    console.error('Doctor not found in either collection');
                     return res.status(404).json({
                         success: false,
                         message: "Doctor not found"
                     });
                 }
-
-                console.log('Found doctor data:', userData);
-
                 // Fetch IPFS data if CID exists
-                if (userData.ipfsCID) {
+                if (userData?.ipfsCID) {
                     try {
-                        console.log('Fetching IPFS data for CID:', userData.ipfsCID);
-                        ipfsData = await IPFSService.retrieveAndDecrypt(userData.ipfsCID, userData.ipfsIV);
+                    ipfsData = await IPFSService.retrieveAndDecrypt(userData.ipfsCID, userData.ipfsIV);
                         console.log('IPFS data fetched:', ipfsData);
                     } catch (ipfsError) {
                         console.error('Error fetching IPFS data:', ipfsError);
-                        // Continue without IPFS data
-                        ipfsData = null;
+                      ipfsData = null;
                     }
                 }
 
                 // Get contact number from either model or IPFS data
-                const contactNumber = userData.phoneNumber || 
-                                    userData.contactNumber || 
+                const contactNumber = userData?.phoneNumber || 
+                                    userData?.contactNumber || 
+                                    doctorData?.contactNumber ||
                                     ipfsData?.contactNumber || 
                                     ipfsData?.phoneNumber;
-
-                // Get date of birth from either model or IPFS data
                 const dateOfBirth = userData.dateOfBirth || ipfsData?.dateOfBirth;
 
                 return res.status(200).json({
                     success: true,
                     message: "Doctor profile data fetched successfully",
                     data: {
-                        fullName: userData.fullName,
+                        fullName: userData?.fullName || doctorData?.fullName,
                         age: dateOfBirth ? calculateAge(dateOfBirth) : null,
                         contact: contactNumber,
-                        email: userData.email,
-                        specialization: userData.specialization
+                        email: userData?.email || doctorData?.email,
+                        specialization: doctorData?.specialization || ipfsData?.specialization,
+                        emergencyContacts: userData?.emergencyContactNumber || doctorData?.emergencyContact || []
                     }
                 });
             } else {
@@ -613,6 +642,92 @@ const loginData = {
             }
         } catch (error) {
             console.error("Error in profileview:", error);
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Internal server error"
+            });
+        }
+    },
+    updateEmergencyContact: async (req, res) => {
+        try {
+            console.log('Update Emergency Contact Request - User Data:', req.user);
+            const { role, id } = req.user;
+            const { emergencyContact } = req.body;
+
+            if (!emergencyContact) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Emergency contact number is required"
+                });
+            }
+
+            let updateResult;
+
+            if (role === 'patient') {
+                // Update in addpatientModel only
+                const userData = await addpatientModel.findById(id);
+                if (!userData) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Patient not found"
+                    });
+                }
+
+                // Get existing contacts or initialize empty array
+                const existingContacts = userData.emergencyContact || [];
+                const updatedContacts = [emergencyContact, ...existingContacts];
+
+                updateResult = await addpatientModel.findByIdAndUpdate(
+                    id,
+                    { 
+                        $set: { 
+                            emergencyContact: updatedContacts,
+                            updatedAt: new Date()
+                        }
+                    },
+                    { new: true }
+                );
+            } else if (role === 'doctor') {
+                // Update in adddoctorModel only
+                const userData = await adddoctor.findOne({ doctorId: id });
+                if (!userData) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Doctor not found"
+                    });
+                }
+
+                // Get existing contacts or initialize empty array
+                const existingContacts = userData.emergencyContact || [];
+                const updatedContacts = [emergencyContact, ...existingContacts];
+
+                updateResult = await adddoctor.findByIdAndUpdate(
+                    userData._id,
+                    { 
+                        $set: { 
+                            emergencyContact: updatedContacts,
+                            updatedAt: new Date()
+                        }
+                    },
+                    { new: true }
+                );
+            } else {
+                return res.status(403).json({
+                    success: false,
+                    message: "Invalid role"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Emergency contact updated successfully",
+                data: {
+                    emergencyContacts: updateResult.emergencyContact
+                }
+            });
+
+        } catch (error) {
+            console.error("Error in updateEmergencyContact:", error);
             return res.status(500).json({
                 success: false,
                 message: error.message || "Internal server error"

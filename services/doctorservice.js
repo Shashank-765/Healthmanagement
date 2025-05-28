@@ -422,9 +422,17 @@ const doctorManagementService = {
 
     updateDoctor: async (email, updateData) => {
         try {
+            console.log('Starting updateDoctor service with:', { email, updateData });
+            
             const cleanEmail = email.toLowerCase().trim();
             const doctor = await adddoctorModel.findOne({ email: cleanEmail });
-            if (!doctor) throw new Error("Doctor not found");
+            
+            if (!doctor) {
+                console.log('Doctor not found with email:', cleanEmail);
+                throw new Error("Doctor not found");
+            }
+
+            console.log('Found doctor:', doctor._id);
 
             // Remove email from updateData to prevent accidental change
             delete updateData.email;
@@ -432,7 +440,6 @@ const doctorManagementService = {
             // Format specialization to remove 'ist' suffix if present
             let specialization = updateData.specialization || doctor.specialization;
             if (typeof specialization === 'string' && specialization.toLowerCase().endsWith('ist')) {
-                // Convert 'Cardiologist' -> 'Cardiology', 'Neurologist' -> 'Neurology', etc.
                 if (specialization.toLowerCase() === 'cardiologist') specialization = 'Cardiologist';
                 else if (specialization.toLowerCase() === 'neurologist') specialization = 'Neurologist';
                 else if (specialization.toLowerCase() === 'dermatologist') specialization = 'Dermatologist';
@@ -444,7 +451,7 @@ const doctorManagementService = {
             const insensitiveData = {
                 fullName: updateData.fullName || doctor.fullName,
                 specialization: specialization,
-                department: specialization, // Use the same formatted specialization
+                department: specialization,
                 experience: parseInt(updateData.experience) || doctor.experience,
                 availability: updateData.availability || doctor.availability,
                 contactnumber: updateData.contactnumber || doctor.contactnumber,
@@ -453,10 +460,8 @@ const doctorManagementService = {
                 bio: updateData.bio || doctor.bio
             };
 
-            // Add profileimage only if it exists in updateData
-            if (updateData.profileimage) {
-                insensitiveData.profileimage = updateData.profileimage;
-            }
+            console.log('Updating doctor with data:', insensitiveData);
+
             // First update the doctor document
             const updatedDoctor = await adddoctorModel.findOneAndUpdate(
                 { email: cleanEmail },
@@ -471,10 +476,15 @@ const doctorManagementService = {
             );
 
             if (!updatedDoctor) {
+                console.log('Failed to update doctor document');
                 throw new Error("Failed to update doctor");
             }
+
+            console.log('Successfully updated doctor document');
+
             // If there's sensitive data to update and IPFS is configured
             if (doctor.ipfsCID) {
+                console.log('Updating IPFS data');
                 const sensitiveData = {
                     contactnumber: updateData.contactnumber || doctor.contactnumber,
                     profileimage: updateData.profileimage || doctor.profileimage,
@@ -482,8 +492,11 @@ const doctorManagementService = {
                     address: updateData.address || doctor.address,
                     bio: updateData.bio || doctor.bio,
                     specialization: specialization,
-                    department: specialization
+                    department: specialization,
+                    experience: parseInt(updateData.experience) || doctor.experience
                 };
+
+                console.log('Sensitive data for IPFS:', sensitiveData);
 
                 // Upload updated sensitive data to IPFS
                 const ipfsResult = await IPFSService.uploadEncryptedData(sensitiveData);
@@ -497,6 +510,7 @@ const doctorManagementService = {
                     },
                     { new: true }
                 );
+                console.log('Successfully updated IPFS data');
             }
 
             return updatedDoctor;
@@ -584,79 +598,82 @@ const addAppointmentToDoctor = async (doctorId, appointmentId) => {
 
 const getDoctorDashboardData = async (doctorEmail) => {
     try {
-    const addDoctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
+        const addDoctor = await adddoctorModel.findOne({ email: doctorEmail.toLowerCase().trim() });
         if (!addDoctor) {
             throw new Error('Doctor profile not found');
         }
 
-        const currentDoctorId = addDoctor._id.toString();
-        const allAppointments = await appointmentModel.find({})
+        const currentDoctorId = addDoctor._id;
+
+        // Get appointments directly using doctorId from adddoctor collection
+        const appointments = await appointmentModel.find({ doctorId: currentDoctorId })
             .populate('patientId', 'fullName')
             .sort({ createdAt: -1 });
 
-   // Filter appointments by decrypting IPFS data and checking doctorId
-        const doctorAppointments = [];
-        const recentAppointmentsWithDetails = [];
-        const uniquePatientIds = new Set();
+        console.log('Found appointments:', appointments.length);
 
-        for (const appointment of allAppointments) {
-            try {
-                if (appointment.ipfsCID && appointment.ipfsIV) {
-                    // Decrypt IPFS data to get doctorId
+        // Process appointments to get unique patients and recent appointments
+        const uniquePatientIds = new Set();
+        const recentAppointmentsWithDetails = [];
+
+        for (const appointment of appointments) {
+            // Add to unique patients set
+            if (appointment.patientId) {
+                uniquePatientIds.add(appointment.patientId._id.toString());
+            }
+
+            // Get IPFS data for appointment details
+            if (appointment.ipfsCID && appointment.ipfsIV) {
+                try {
                     const ipfsData = await IPFSService.retrieveAndDecrypt(
                         appointment.ipfsCID,
                         appointment.ipfsIV
                     );
 
-                    // Check if this appointment belongs to current doctor
-                    const appointmentDoctorId = ipfsData.doctorId ? ipfsData.doctorId.toString() : null;
-                    
-                    if (appointmentDoctorId === currentDoctorId) {
-                        // This appointment belongs to current doctor
-                        doctorAppointments.push(appointment);
-                        
-                        // Add to unique patients set
-                        if (appointment.patientId) {
-                            uniquePatientIds.add(appointment.patientId._id.toString());
-                        }
+                    console.log('IPFS data for appointment:', {
+                        id: appointment._id,
+                        date: ipfsData.appointmentDate,
+                        time: ipfsData.appointmentTime,
+                        status: ipfsData.status
+                    });
 
-                        // Add to recent appointments (limit to 5)
-                        if (recentAppointmentsWithDetails.length < 5) {
-                            recentAppointmentsWithDetails.push({
-                                _id: appointment._id,
-                                patientName: appointment.patientId?.fullName || 'N/A',
-                                appointmentDate: ipfsData.appointmentDate || 'Not Available',
-                                appointmentTime: ipfsData.appointmentTime || 'Not Available',
-                                status: ipfsData.status || 'pending'
-                            });
-                        }
+                    // Add to recent appointments (limit to 5)
+                    if (recentAppointmentsWithDetails.length < 5) {
+                        recentAppointmentsWithDetails.push({
+                            _id: appointment._id,
+                            patientName: appointment.patientId?.fullName || 'N/A',
+                            appointmentDate: ipfsData.appointmentDate || 'Not Available',
+                            appointmentTime: ipfsData.appointmentTime || 'Not Available',
+                            status: ipfsData.status || appointment.status || 'pending'
+                        });
                     }
-                } else {
-                    console.log(`Appointment ${appointment._id} missing IPFS data`);
+                } catch (error) {
+                    console.error(`Error retrieving IPFS data for appointment ${appointment._id}:`, error);
                 }
-            } catch (error) {
-                console.error(`Error processing appointment ${appointment._id}:`, error);
             }
         }
 
-        const totalAppointments = doctorAppointments.length;
-        const totalPatients = uniquePatientIds.size;
+        console.log('Processed data:', {
+            totalAppointments: appointments.length,
+            uniquePatients: uniquePatientIds.size,
+            recentAppointments: recentAppointmentsWithDetails.length
+        });
 
-          let totalMedicalHistory = 0;
+        // Get total medical history count
+        let totalMedicalHistory = 0;
         try {
             totalMedicalHistory = await medicalHistoryModel.countDocuments({ 
                 doctorId: currentDoctorId 
             });
         } catch (error) {
             console.log('Error counting medical history:', error);
-            totalMedicalHistory = 0;
         }
 
         return {
             success: true,
             data: {
-                totalAppointments,
-                totalPatients,
+                totalAppointments: appointments.length,
+                totalPatients: uniquePatientIds.size,
                 totalMedicalHistory,
                 recentAppointments: recentAppointmentsWithDetails,
                 doctorInfo: {
@@ -672,6 +689,7 @@ const getDoctorDashboardData = async (doctorEmail) => {
         throw new Error(`Error fetching doctor dashboard data: ${error.message}`);
     }
 };
+
 
 module.exports = {
     doctorSignupService,

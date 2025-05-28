@@ -9,20 +9,14 @@ const Signup = require('../models/insurance/signupModel');
 const authMiddleware = {
     authenticateToken: async (req, res, next) => {
         try {
-            // console.log('Auth Middleware - Headers:', req.headers);
-            
-            // Check for token in Authorization header
             const authHeader = req.headers.authorization;
             let token;
 
             if (authHeader) {
                 token = authHeader.split(' ')[1];
-                // console.log('Token from Authorization header:', token);
-            } else {
-                // Check for token in cookies
-                token = req.cookies?.token;
-                console.log('Token from cookies:', token);
-            }
+              } else {
+               token = req.cookies?.token;
+              }
 
             if (!token) {
                 console.error('No token found in request');

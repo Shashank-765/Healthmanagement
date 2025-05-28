@@ -318,54 +318,22 @@ module.exports = {
             const limit = 10; // 10 rows per page
             const skip = (page - 1) * limit;
             
-            // First find all appointments
-            const appointments = await appointmentModel.find()
+            // Find appointments with status "pending" directly from MongoDB
+            const appointments = await appointmentModel.find({ status: "pending" })
                 .populate('doctorId', 'fullName specialization')
-                .populate('patientId', 'fullName');
+                .populate('patientId', 'fullName')
+                .sort({ createdAt: -1 });
             
             if(!appointments || appointments.length === 0){
-                return res.status(404).json({
-                    success: false,
-                    message: "No appointments found"
-                });
-            }
-
-            // Process appointments to get status from IPFS
-            const processedAppointments = await Promise.all(appointments.map(async (appointment) => {
-                let status = 'pending'; // default status
-                
-                // Try to get status from IPFS if available
-                if (appointment.ipfsCID && appointment.ipfsIV) {
-                    try {
-                        const ipfsData = await IPFSService.retrieveAndDecrypt(
-                            appointment.ipfsCID,
-                            appointment.ipfsIV
-                        );
-                        status = ipfsData.status || 'pending';
-                    } catch (error) {
-                        console.error(`Error retrieving IPFS data for appointment ${appointment._id}:`, error);
-                        // Keep default status if IPFS retrieval fails
-                    }
-                }
-
-                return {
-                    ...appointment.toObject(),
-                    status: status
-                };
-            }));
-
-            // Filter pending appointments
-            let pendingAppointments = processedAppointments.filter(app => app.status === "pending");
-            
-            if(pendingAppointments.length === 0) {
                 return res.status(404).json({
                     success: false,
                     message: "No pending appointments found"
                 });
             }
 
-            // Apply search filter if provided
-            let filteredAppointments = pendingAppointments;
+            // Filter the results based on search term
+            let filteredAppointments = appointments;
+            
             if(search) {
                 const searchTerm = search.toLowerCase();
                 filteredAppointments = filteredAppointments.filter(appointment => 

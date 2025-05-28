@@ -80,6 +80,19 @@ const addpatientSchema = new mongoose.Schema({
             message: props => `${props.value} is not a valid email!`
         }
     },
+    emergencyContact: {
+        type: [String],
+        default: [],
+        validate: {
+            validator: function(contacts) {
+                // Check if all contacts are valid
+                return contacts.every(contact => 
+                    /^\d{10}$/.test(contact) // Exactly 10 digits
+                );
+            },
+            message: 'Emergency contact must be exactly 10 digits'
+        }
+    },
     ipfsCID: {
         type: String
     },

@@ -17,12 +17,10 @@ const appointmentSchema = new mongoose.Schema({
         default: 'pending'
     },
     ipfsCID: {
-        type: String,
-        required: true
+        type: String
     },
     ipfsIV: {
-        type: String,
-        required: true
+        type: String
     }
 }, { timestamps: true }, {versionKey:false});
 
