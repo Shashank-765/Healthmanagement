@@ -170,8 +170,7 @@ module.exports = {
             const validatedData = await createdDoctor.validateDoctorData(doctorData, userRole);
             const newDoctor = await createdDoctor.saveDoctor(validatedData);
 
-            // Fetch the newly created doctor with decrypted IPFS data
-            const filters = { fullName: newDoctor.fullName };
+           const filters = { fullName: newDoctor.fullName };
             const doctors = await doctorManagementService.getDoctors(filters);
             const createdDoctorWithIPFSData = doctors.length > 0 ? doctors[0] : newDoctor;
 

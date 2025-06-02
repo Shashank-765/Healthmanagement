@@ -364,8 +364,6 @@ const doctorManagementService = {
                                 doctor.ipfsCID,
                                 doctor.ipfsIV
                             );
-                            console.log(`Successfully decrypted IPFS data for doctor ${doctor._id}:`, ipfsData);
-
                             // Update fields with IPFS data if available
                             specialization = ipfsData.specialization || specialization;
                             experience = ipfsData.experience || ipfsData.yearsOfExperience || experience;

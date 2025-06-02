@@ -232,12 +232,6 @@ const appointmentController = {
                             appointment.ipfsCID,
                             appointment.ipfsIV
                         );
-                        console.log('6.2 IPFS data retrieved:', {
-                            date: sensitiveData.appointmentDate,
-                            time: sensitiveData.appointmentTime,
-                            department: sensitiveData.department,
-                            reason: sensitiveData.reason
-                        });
                     }
 
                     // Format the date and time
@@ -376,7 +370,7 @@ const appointmentController = {
 
     getAllDoctors: async (req, res) => {
         try {
-            const userRole = req.user.role; // Get user role from token
+            const userRole = req.user.role;
 
             // If user is admin, get all doctor details
             if (userRole === 'admin') {
@@ -719,7 +713,7 @@ const appointmentController = {
             const userId = req.user.id;
             const userRole = req.user.role;
 
-            console.log('Updating appointment status:', {
+            console.log('[UPDATE_APPOINTMENT_STATUS] Starting status update:', {
                 appointmentId,
                 status,
                 userId,
@@ -728,6 +722,7 @@ const appointmentController = {
 
             // Validate required fields
             if (!appointmentId || !status) {
+                console.log('[UPDATE_APPOINTMENT_STATUS] Validation failed - missing fields');
                 return res.status(400).json({
                     success: false,
                     message: "Appointment ID and status are required"
@@ -736,6 +731,7 @@ const appointmentController = {
 
             // Validate status value
             if (!['confirm', 'pending', 'cancelled'].includes(status)) {
+                console.log('[UPDATE_APPOINTMENT_STATUS] Invalid status value:', status);
                 return res.status(400).json({
                     success: false,
                     message: "Invalid status. Must be: confirm, pending, or cancelled"
@@ -743,16 +739,28 @@ const appointmentController = {
             }
 
             // Find the appointment
-            const appointment = await appointmentModel.findById(appointmentId);
+            const appointment = await appointmentModel.findById(appointmentId)
+                .populate('patientId', 'fullName email')
+                .populate('doctorId', 'fullName email');
+                
             if (!appointment) {
+                console.log('[UPDATE_APPOINTMENT_STATUS] Appointment not found:', appointmentId);
                 return res.status(404).json({
                     success: false,
                     message: "Appointment not found"
                 });
             }
 
+            console.log('[UPDATE_APPOINTMENT_STATUS] Found appointment:', {
+                id: appointment._id,
+                patientName: appointment.patientId?.fullName,
+                doctorName: appointment.doctorId?.fullName,
+                currentStatus: appointment.status
+            });
+
             // Check if user is authorized (admin or doctor)
             if (userRole !== 'admin' && userRole !== 'doctor') {
+                console.log('[UPDATE_APPOINTMENT_STATUS] Unauthorized user:', userRole);
                 return res.status(403).json({
                     success: false,
                     message: "Unauthorized: Only doctors and admins can update appointment status"
@@ -763,21 +771,41 @@ const appointmentController = {
             if (userRole === 'doctor') {
                 const doctor = await adddoctorModel.findOne({ email: req.user.email });
                 if (!doctor) {
+                    console.log('[UPDATE_APPOINTMENT_STATUS] Doctor not found:', req.user.email);
                     return res.status(404).json({
                         success: false,
                         message: "Doctor not found"
                     });
                 }
 
-                if (appointment.doctorId.toString() !== doctor._id.toString()) {
+                console.log('[UPDATE_APPOINTMENT_STATUS] Checking doctor authorization:', {
+                    doctorId: doctor._id.toString(),
+                    appointmentDoctorId: appointment.doctorId._id.toString(),
+                    doctorEmail: req.user.email,
+                    doctorName: doctor.fullName
+                });
+
+                // Check if the doctor is assigned to this appointment
+                if (!appointment.doctorId || appointment.doctorId._id.toString() !== doctor._id.toString()) {
+                    console.log('[UPDATE_APPOINTMENT_STATUS] Doctor not authorized for this appointment:', {
+                        doctorId: doctor._id.toString(),
+                        appointmentDoctorId: appointment.doctorId?._id.toString(),
+                        doctorName: doctor.fullName,
+                        appointmentDoctorName: appointment.doctorId?.fullName
+                    });
                     return res.status(403).json({
                         success: false,
                         message: "Unauthorized: You can only update appointments assigned to you"
                     });
                 }
+
+                console.log('[UPDATE_APPOINTMENT_STATUS] Doctor authorized successfully:', {
+                    doctorId: doctor._id.toString(),
+                    doctorName: doctor.fullName
+                });
             }
 
-            console.log('Getting current IPFS data for update...');
+            console.log('[UPDATE_APPOINTMENT_STATUS] Getting current IPFS data...');
             
             // Get current IPFS data
             let currentIPFSData;
@@ -786,8 +814,9 @@ const appointmentController = {
                     appointment.ipfsCID,
                     appointment.ipfsIV
                 );
+                console.log('[UPDATE_APPOINTMENT_STATUS] Retrieved IPFS data successfully');
             } catch (error) {
-                console.error('Error retrieving current IPFS data:', error);
+                console.error('[UPDATE_APPOINTMENT_STATUS] Error retrieving IPFS data:', error);
                 return res.status(500).json({
                     success: false,
                     message: "Failed to retrieve current appointment data from IPFS"
@@ -802,15 +831,15 @@ const appointmentController = {
                 statusUpdatedBy: req.user.email
             };
 
-            console.log('Updated IPFS data with new status:', updatedIPFSData);
+            console.log('[UPDATE_APPOINTMENT_STATUS] Updated IPFS data:', updatedIPFSData);
 
             // Upload updated data to IPFS
             let newIPFSResult;
             try {
                 newIPFSResult = await IPFSService.uploadEncryptedData(updatedIPFSData);
-                console.log('New IPFS upload result:', newIPFSResult);
+                console.log('[UPDATE_APPOINTMENT_STATUS] New IPFS upload successful:', newIPFSResult);
             } catch (error) {
-                console.error('Error uploading updated data to IPFS:', error);
+                console.error('[UPDATE_APPOINTMENT_STATUS] Error uploading to IPFS:', error);
                 return res.status(500).json({
                     success: false,
                     message: "Failed to update appointment status in IPFS"
@@ -824,8 +853,32 @@ const appointmentController = {
             appointment.updatedAt = new Date();
             
             await appointment.save();
+            console.log('[UPDATE_APPOINTMENT_STATUS] MongoDB document updated successfully');
 
-            console.log('Successfully updated appointment status:', {
+            // Create notification for patient about status change
+            try {
+                console.log('[UPDATE_APPOINTMENT_STATUS] Creating notification for patient:', {
+                    patientId: appointment.patientId._id,
+                    patientName: appointment.patientId.fullName,
+                    appointmentId: appointment._id,
+                    newStatus: status,
+                    doctorName: appointment.doctorId.fullName
+                });
+
+                await notificationController.createAppointmentStatusNotification({
+                    patientId: appointment.patientId._id,
+                    appointmentId: appointment._id,
+                    status: status,
+                    doctorName: appointment.doctorId.fullName
+                });
+
+                console.log('[UPDATE_APPOINTMENT_STATUS] Notification created successfully');
+            } catch (notificationError) {
+                console.error('[UPDATE_APPOINTMENT_STATUS] Error creating notification:', notificationError);
+                // Don't throw error here, as appointment is already updated
+            }
+
+            console.log('[UPDATE_APPOINTMENT_STATUS] Successfully completed status update:', {
                 appointmentId: appointment._id,
                 newStatus: status,
                 newCID: newIPFSResult.cid
@@ -843,7 +896,7 @@ const appointmentController = {
             });
 
         } catch (error) {
-            console.error("Error updating appointment status:", error);
+            console.error("[UPDATE_APPOINTMENT_STATUS] Error updating appointment status:", error);
             res.status(500).json({
                 success: false,
                 message: error.message || "Failed to update appointment status"
