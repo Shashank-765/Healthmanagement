@@ -630,13 +630,6 @@ const getDoctorDashboardData = async (doctorEmail) => {
                         appointment.ipfsIV
                     );
 
-                    console.log('IPFS data for appointment:', {
-                        id: appointment._id,
-                        date: ipfsData.appointmentDate,
-                        time: ipfsData.appointmentTime,
-                        status: ipfsData.status
-                    });
-
                     // Add to recent appointments (limit to 5)
                     if (recentAppointmentsWithDetails.length < 5) {
                         recentAppointmentsWithDetails.push({
@@ -652,12 +645,6 @@ const getDoctorDashboardData = async (doctorEmail) => {
                 }
             }
         }
-
-        console.log('Processed data:', {
-            totalAppointments: appointments.length,
-            uniquePatients: uniquePatientIds.size,
-            recentAppointments: recentAppointmentsWithDetails.length
-        });
 
         // Get total medical history count
         let totalMedicalHistory = 0;

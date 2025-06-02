@@ -77,8 +77,10 @@ const authMiddleware = {
             req.user = {
                 id: user._id,
                 email: user.email,
+                // fullName: user.fullName,
                 role: decoded.role,
-                name: user.name || user.fullName
+                name: user.name || user.fullName,
+                fullName: user.fullName
             };
 
             next();

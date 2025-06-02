@@ -3,6 +3,7 @@ const appointmentService = require('../../services/appointmentService');
 const adddoctorModel = require('../../models/doctor/adddoctorModel');
 const addpatientModel = require('../../models/patient/addpatientModel');
 const IPFSService = require('../../services/ipfsService');
+const notificationController = require('../notification/notificationController');
 const mongoose = require('mongoose');
 const appointmentController = {
     createAppointment: async (req, res) => {
@@ -129,6 +130,29 @@ const appointmentController = {
             await adddoctorModel.findByIdAndUpdate(doctor._id, {
                 $push: { appointments: appointment._id }
             });
+
+            console.log('Creating notification for doctor:', {
+                doctorId: doctor._id,
+                doctorName: doctor.name || doctor.username,
+                patientId: patient._id,
+                patientName: patient.fullName,
+                appointmentId: appointment._id
+            });
+
+            // Create notification for doctor
+            try {
+                await notificationController.createAppointmentNotificationInternal({
+                    doctorId: doctor._id,
+                    patientId: patient._id,
+                    appointmentId: appointment._id,
+                    patientName: patient.fullName
+                });
+                console.log('Notification created successfully');
+            } catch (notificationError) {
+                console.error('Error creating notification:', notificationError);
+                // Don't throw error here, as appointment is already created
+            }
+
             res.status(201).json({
                 success: true,
                 message: "Appointment created successfully",

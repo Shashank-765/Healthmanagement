@@ -409,9 +409,7 @@ const appointmentService = {
                         createdAt: appointment.createdAt,
                         updatedAt: appointment.updatedAt
                     };
-                } catch (error) {
-                    console.error('Error retrieving IPFS data for appointment:', appointment._id, error);
-                    
+                } catch (error) {  
                     // Return with fallback data
                     return {
                         _id: appointment._id,

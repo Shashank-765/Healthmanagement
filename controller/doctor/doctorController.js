@@ -4,6 +4,8 @@ const doctorSignup = require('../../models/doctor/signupModel');
 const doctorLogin = require('../../models/doctor/loginModel');
 const adddoctorModel = require('../../models/doctor/adddoctorModel');
 const appointmentModel = require('../../models/appointment/appointmentModel');
+const notificationModel = require('../../models/notification/notificationModel');
+const pusher = require('../../utils/pusher');
 const { doctorSignupService, doctorLoginService, createdDoctor, doctorManagementService, getDoctorDashboardData } = require('../../services/doctorservice');
 const encryptionService = require('../../utils/encryptdecrypt');
 const IPFSService = require('../../services/ipfsService');
@@ -445,9 +447,6 @@ module.exports = {
 
             // If doctor already exists, update only minimal fields
             if (existingAddDoctor) {
-                console.log("=== EXISTING DOCTOR FOUND ===");
-                console.log("signupDoctor:", signupDoctor);
-                console.log("existingAddDoctor:", existingAddDoctor);
 
                 const updateObj = {
                     doctorId: signupDoctor._id,
@@ -502,10 +501,23 @@ module.exports = {
     },
     rateDoctor: async (req, res) => {
         try {
+            console.log('[RATE_DOCTOR] Starting rate doctor process');
             const { doctorName, rating, comment } = req.body;
             const patient_id = req.user && req.user.id;
 
+            console.log('[RATE_DOCTOR] Request data:', {
+                doctorName,
+                rating,
+                patient_id,
+                user: req.user
+            });
+
             if (!doctorName || !rating || !patient_id) {
+                console.log('[RATE_DOCTOR] Missing required fields:', {
+                    doctorName: !!doctorName,
+                    rating: !!rating,
+                    patient_id: !!patient_id
+                });
                 return res.status(400).json({
                     success: false,
                     message: "doctorName, rating, and patient_id are required"
@@ -514,14 +526,28 @@ module.exports = {
 
             // Find doctor by name (case-insensitive, and ideally unique)
             const doctor = await adddoctorModel.findOne({ fullName: doctorName });
+            console.log('[RATE_DOCTOR] Found doctor:', {
+                found: !!doctor,
+                doctorId: doctor?._id,
+                doctorName: doctor?.fullName,
+                doctorEmail: doctor?.email
+            });
+
             if (!doctor) {
                 return res.status(404).json({
                     success: false,
                     message: "Doctor not found"
                 });
             }
+
             const doctorId = doctor._id;
             const ratingExist = doctor.ratings.some(r => r.patient_id?.toString() === patient_id.toString());
+
+            console.log('[RATE_DOCTOR] Checking existing rating:', {
+                ratingExists: ratingExist,
+                patient_id,
+                doctorRatings: doctor.ratings.length
+            });
 
             if (ratingExist) {
                 return res.status(400).json({
@@ -536,24 +562,40 @@ module.exports = {
                 date: new Date(),
                 patient_id
             };
+
+            console.log('[RATE_DOCTOR] Creating rating object:', ratingObj);
+
             const ipfsResult = await IPFSService.uploadEncryptedData(ratingObj);
+            console.log('[RATE_DOCTOR] IPFS upload result:', {
+                success: !!ipfsResult,
+                cid: ipfsResult?.cid
+            });
+
             if (!ipfsResult || !ipfsResult.cid) {
                 return res.status(500).json({
                     success: false,
                     message: "Failed to upload rating to IPFS"
                 });
             }
-               const ratingRef = {
+
+            const ratingRef = {
                 ipfsCID: ipfsResult.cid,
                 ipfsIV: ipfsResult.iv || "",
                 patient_id: patient_id,
             };
+
+            console.log('[RATE_DOCTOR] Updating doctor with new rating');
 
             const updatedDoctor = await adddoctorModel.findByIdAndUpdate(
                 doctorId,
                 { $push: { ratings: ratingRef } },
                 { new: true, runValidators: true }
             );
+
+            console.log('[RATE_DOCTOR] Doctor updated with new rating:', {
+                success: !!updatedDoctor,
+                doctorId: updatedDoctor?._id
+            });
 
             if (!updatedDoctor) {
                 return res.status(404).json({
@@ -562,12 +604,71 @@ module.exports = {
                 });
             }
 
+            // Create notification for the doctor about the new review
+            try {
+                console.log('[RATE_DOCTOR] Starting notification creation');
+                console.log('[RATE_DOCTOR] Notification details:', {
+                    recipientId: doctor.fullName,
+                    recipientModel: 'Doctor',
+                    patientId: patient_id,
+                    rating: rating
+                });
+
+                // First check if notification model is properly imported
+                if (!notificationModel) {
+                    console.error('[RATE_DOCTOR] Notification model not found');
+                    throw new Error('Notification model not found');
+                }
+
+                const notification = await notificationModel.create({
+                    recipientId: doctor.fullName,
+                    recipientModel: 'Doctor',
+                    patientId: patient_id,
+                    title: 'New Review Received',
+                    message: `You have received a ${rating} star review from a patient`,
+                    read: false,
+                    createdAt: new Date()
+                });
+
+                console.log('[RATE_DOCTOR] Notification created successfully:', {
+                    notificationId: notification._id,
+                    message: notification.message,
+                    recipientId: notification.recipientId
+                });
+
+                // Trigger Pusher event
+                console.log('[RATE_DOCTOR] Triggering Pusher event');
+                const channelName = `notifications-${doctor.fullName}`;
+                console.log('[RATE_DOCTOR] Pusher channel:', channelName);
+
+                const pusherResponse = await pusher.trigger(channelName, 'new-notification', {
+                    notification: notification
+                });
+
+                console.log('[RATE_DOCTOR] Pusher event triggered:', {
+                    success: !!pusherResponse,
+                    channel: channelName
+                });
+            } catch (notificationError) {
+                console.error('[RATE_DOCTOR] Error creating review notification:', {
+                    error: notificationError.message,
+                    stack: notificationError.stack,
+                    name: notificationError.name
+                });
+                // Don't fail the request if notification creation fails
+            }
+
             return res.status(200).json({
                 success: true,
                 message: "Rating submitted successfully",
                 data: updatedDoctor
             });
         } catch (error) {
+            console.error('[RATE_DOCTOR] Error in rateDoctor:', {
+                error: error.message,
+                stack: error.stack,
+                name: error.name
+            });
             return res.status(500).json({
                 success: false,
                 message: error.message || "Internal server error"

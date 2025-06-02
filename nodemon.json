@@ -3,12 +3,14 @@
     "server/data/*",
     "server/data/**/*",
     "*.json",
-    "node_modules/**/node_modules"
+    "node_modules/**/node_modules",
+    "server/data/encrypted_records.json"
   ],
-  "delay": "1000",
+  "delay": "2500",
   "watch": [
     "server/**/*.js",
     "index.js"
   ],
-  "ext": "js"
+  "ext": "js",
+  "verbose": true
 } 
