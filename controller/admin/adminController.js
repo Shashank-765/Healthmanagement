@@ -1,4 +1,11 @@
 const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const Pusher = require('pusher');
+const Notification = require('../../models/notification/notificationModel');
+const Signup = require('../../models/insurance/signupModel');
+const InsurancePatient = require('../../models/insurance/insurancePatientModel');
 const { adminSignupService, adminLoginService } = require('../../services/adminservice');
 const adminSignupModel = require('../../models/admin/adminSignupModel');
 const patientSignupModel = require("../../models/patient/signupModel")
@@ -7,10 +14,10 @@ const addpatientModel = require("../../models/patient/addpatientModel");
 const adddoctorModel = require("../../models/doctor/adddoctorModel");
 const appointmentModel = require("../../models/appointment/appointmentModel");
 const IPFSService = require('../../services/ipfsService');
-const InsurancePatient = require('../../models/insurance/insurancePatientModel');
 const AddPatient = require('../../models/patient/addpatientModel');
 const MedicalHistory = require('../../models/medicalHistory/medicalHistoryModel');
-const jwt = require('jsonwebtoken');
+const notificationController = require('../notification/notificationController');
+const notificationModel = require('../../models/notification/notificationModel');
 // const adminLoginModel = require('../models/admin/adminloginModel');
 
 module.exports = {
@@ -318,7 +325,6 @@ module.exports = {
             const limit = 10; // 10 rows per page
             const skip = (page - 1) * limit;
             
-            // Find appointments with status "pending" directly from MongoDB
             const appointments = await appointmentModel.find({ status: "pending" })
                 .populate('doctorId', 'fullName specialization')
                 .populate('patientId', 'fullName')
@@ -561,11 +567,21 @@ module.exports = {
             }
 
             // Find the insurance patient record
-            const insurancePatient = await InsurancePatient.findById(requestId);
+            const insurancePatient = await InsurancePatient.findById(requestId)
+                .populate('accessRequest.insuranceId', 'name email');
+
             if (!insurancePatient) {
                 return res.status(404).json({
                     success: false,
                     message: "Access request not found"
+                });
+            }
+
+            // Validate insurance data
+            if (!insurancePatient.accessRequest || !insurancePatient.accessRequest.insuranceName) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid insurance data in request"
                 });
             }
 
@@ -575,6 +591,68 @@ module.exports = {
             insurancePatient.accessRequest.processedDate = new Date();
 
             await insurancePatient.save();
+
+            // Create notification for insurance company
+            try {
+                const insuranceName = insurancePatient.accessRequest.insuranceName;
+                const patientName = insurancePatient.name || 'Unknown Patient';
+
+                console.log('=== Notification Creation Started ===');
+                console.log('Insurance Details:', {
+                    name: insuranceName,
+                    patientName: patientName
+                });
+
+                const notificationData = {
+                    title: action === 'approve' ? 'Patient Access Granted' : 'Patient Access Denied',
+                    message: action === 'approve' 
+                        ? `Admin has granted you permission to access ${patientName}'s medical records`
+                        : `Admin has denied your request to access ${patientName}'s medical records`,
+                    type: 'insurance-access',
+                    // recipientId: insuranceName,
+                    recipientId: insurancePatient.accessRequest.insuranceId?._id,
+                    recipientModel: 'Insurance',
+                    recipientName: insuranceName,
+                    status: action === 'approve' ? 'approved' : 'denied',
+                    patientName: patientName
+                };
+
+                console.log('Creating notification with data:', notificationData);
+
+                // Create notification
+                const notification = await notificationModel.create(notificationData);
+                console.log('Notification created successfully:', {
+                    id: notification._id,
+                    title: notification.title,
+                    recipientId: notification.recipientId
+                });
+
+                // Configure Pusher
+                const pusher = new Pusher({
+                    appId: process.env.PUSHER_APP_ID,
+                    key: process.env.PUSHER_KEY,
+                    secret: process.env.PUSHER_SECRET,
+                    cluster: process.env.PUSHER_CLUSTER,
+                    useTLS: true
+                });
+
+                const channelName = `notifications-insurance-${insuranceName}`;
+                console.log('Triggering Pusher:', { channel: channelName, event: 'new-notification', notification });
+
+                // Trigger real-time notification
+                await pusher.trigger(channelName, 'new-notification', { notification });
+
+                console.log('=== Notification Process Completed ===');
+                console.log('Notification created and Pusher event triggered successfully');
+            } catch (notificationError) {
+                console.error('=== Notification Error ===');
+                console.error('Error creating notification:', notificationError);
+                console.error('Error details:', {
+                    message: notificationError.message,
+                    stack: notificationError.stack
+                });
+                // Continue with the response even if notification fails
+            }
 
             res.status(200).json({
                 success: true,
@@ -921,166 +999,81 @@ module.exports = {
                                      'Not Available';
                     } catch (error) {
                         console.error(`Error retrieving IPFS data for patient ${history.patientId._id}:`, error);
+                        contactNumber = 'Error Loading';
                     }
                 }
-                
-                // Create patient data with default values for missing fields
-                const patientData = {
-                    patientId: history.patientId._id,
-                    name: history.patientId.fullName || 'Unknown',
-                    email: history.patientId.email || 'No email provided',
+
+                // Now fetch notes and condition from medical history IPFS
+                let condition = 'No condition specified';
+                let notes = 'No notes available';
+
+                // Try to get condition and notes from medical history IPFS
+                if (history.ipfsCID && history.ipfsIV) { 
+                    try {
+                        const medicalIPFSData = await IPFSService.retrieveAndDecrypt(
+                            history.ipfsCID,
+                            history.ipfsIV
+                        );
+                        
+                        condition = medicalIPFSData.condition || 'No condition in IPFS';
+                        notes = medicalIPFSData.notes || 'No notes in IPFS';
+                    } catch (error) {
+                        console.error(`Error retrieving medical IPFS data for history ${history._id}:`, error);
+                        condition = history.condition || 'IPFS error - no MongoDB condition';
+                        notes = history.notes || 'IPFS error - no MongoDB notes';
+                    }
+                } else {
+                    condition = history.condition || 'No condition specified';
+                    notes = history.notes || 'No notes available';
+                }
+
+                // Add medical history to patient
+                const patient = {
+                    _id: history.patientId._id,
+                    name: history.patientId.fullName,
+                    email: history.patientId.email,
                     phone: contactNumber,
                     medicalHistory: [{
-                        condition: history.condition || 'No condition specified',
-                        notes: history.notes || 'No notes available',
+                        _id: history._id,
+                        condition: condition,
+                        notes: notes,
                         date: history.date || new Date(),
-                        doctorId: history.doctorId._id,
-                        doctorName: history.doctorId.fullName || 'Unknown Doctor'
+                        doctorName: history.doctorId?.fullName || 'Unknown Doctor'
                     }]
                 };
 
-                try {
-                    // Check if patient already exists in InsurancePatient collection
-                    let insurancePatient = await InsurancePatient.findOne({ patientId: history.patientId._id });
-
-                    if (insurancePatient) {
-                        // Update contact info if needed
-                        if (contactNumber && contactNumber !== 'Not Available' && 
-                            (!insurancePatient.phone || insurancePatient.phone === 'Not Available' || 
-                             insurancePatient.phone === 'No phone provided')) {
-                            insurancePatient.phone = contactNumber;
-                        }
-                        
-                        // Check if this medical history is already included
-                        const historyExists = insurancePatient.medicalHistory.some(
-                            h => h.doctorId && 
-                                 h.doctorId.equals(history.doctorId._id) && 
-                                 new Date(h.date).toDateString() === new Date(history.date).toDateString()
-                        );
-
-                        if (!historyExists) {
-                            // Only add if not already exists
-                            insurancePatient.medicalHistory.push(...patientData.medicalHistory);
-                            await insurancePatient.save();
-                            processedCount++;
-                        }
-                    } else {
-                        // Create new record
-                        insurancePatient = new InsurancePatient(patientData);
-                        await insurancePatient.save();
-                        processedCount++;
-                    }
-                } catch (error) {
-                    console.log('Error processing patient record:', error.message);
-                    skippedCount++;
-                    continue; // Skip to next record if there's an error
+                // Check if patient already exists in map
+                if (patientsMap.has(patient._id.toString())) {
+                    const existingPatient = patientsMap.get(patient._id.toString());
+                    existingPatient.medicalHistory.push(...patient.medicalHistory);
+                } else {
+                    patientsMap.set(patient._id.toString(), patient);
                 }
+            }
+
+            // Convert map to array and sort by name
+            const formattedPatients = Array.from(patientsMap.values())
+                .sort((a, b) => a.name.localeCompare(b.name));
+                
+            if (formattedPatients.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "No patients with medical history found"
+                });
             }
 
             res.status(200).json({
                 success: true,
-                message: "Medical history sync completed",
-                stats: {
-                    totalRecords: medicalHistories.length,
-                    processedCount,
-                    skippedCount
-                }
+                message: "Patients with medical history retrieved successfully",
+                data: formattedPatients
             });
         } catch (error) {
-            console.log('Error syncing medical history data:', error.message);
+            console.error("Error in syncMedicalHistoryData:", error);
             res.status(500).json({
                 success: false,
-                message: "Error syncing medical history data",
+                message: "Error syncing medical history",
                 error: error.message
             });
         }
     },
-    getPatientsWithMedicalHistory: async (req, res) => {
-        try {
-            console.log("Fetching patients with medical history...");
-            
-            // Instead of processing all medical histories each time, just fetch the already processed data
-            const patients = await InsurancePatient.find({})
-                .select('patientId name email phone medicalHistory isVerified hasAccess accessRequest')
-                .populate({
-                    path: 'patientId',
-                    select: 'fullName email contactnumber ipfsCID ipfsIV',
-                    model: 'AddPatient'
-                })
-                .sort({ createdAt: -1 });
-            
-            const totalMedicalHistory = await MedicalHistory.countDocuments();
-            const totalInsurancePatients = await InsurancePatient.countDocuments({ hasAccess: true });
-            
-            // Format the response based on access rights
-            const formattedPatients = await Promise.all(patients.map(async patient => {
-                // Get contact number from multiple sources
-                let contactNumber = patient.phone || 'Not Available';
-                if (patient.patientId && patient.patientId.contactnumber) {
-                    contactNumber = patient.patientId.contactnumber;
-                } 
-                // If not available in MongoDB, get from IPFS
-                else if (patient.patientId && patient.patientId.ipfsCID && patient.patientId.ipfsIV) {
-                    try {
-                        const ipfsData = await IPFSService.retrieveAndDecrypt(
-                            patient.patientId.ipfsCID,
-                            patient.patientId.ipfsIV
-                        );
-                        
-                        // Get contact number from IPFS with various possible field names
-                        contactNumber = ipfsData.contactNumber || 
-                                     ipfsData.phoneNumber || 
-                                     ipfsData.contactnumber || 
-                                     ipfsData.phone ||
-                                     contactNumber;
-                    } catch (error) {
-                        console.error(`Error retrieving IPFS data for patient:`, error);
-                        // Keep the original contact number if IPFS fails
-                    }
-                }
-
-                const basicInfo = {
-                    _id: patient._id,
-                    name: patient.name || (patient.patientId ? patient.patientId.fullName : 'Unknown'),
-                    email: patient.email || (patient.patientId ? patient.patientId.email : 'No email provided'),
-                    phone: contactNumber,
-                    isVerified: patient.isVerified || false,
-                    hasAccess: patient.hasAccess || false,
-                    requestPending: patient.accessRequest && patient.accessRequest.status === 'pending'
-                };
-
-                // If access is granted, include medical history
-                if (patient.hasAccess) {
-                    return {
-                        ...basicInfo,
-                        medicalHistory: patient.medicalHistory && patient.medicalHistory.length > 0 ? 
-                            patient.medicalHistory.map(history => ({
-                                condition: history.condition || 'No condition specified',
-                                notes: history.notes || 'No notes available',
-                                date: history.date || new Date(),
-                                doctorName: history.doctorName || 'Unknown Doctor'
-                            })) : []
-                    };
-                }
-
-                // If no access, only return basic info
-                return basicInfo;
-            }));
-
-            res.status(200).json({
-                success: true,
-                message: "Patients with medical history fetched successfully",
-                totalMedicalHistory: totalMedicalHistory,
-                totalInsurancePatients: totalInsurancePatients,
-                data: formattedPatients
-            });
-        } catch (error) {
-            console.log('Error fetching patients with medical history:', error.message);
-            res.status(500).json({
-                success: false,
-                message: "Error fetching patients with medical history",
-                error: error.message
-            });
-        }
-    }
-};
+}

@@ -26,8 +26,10 @@ class IPFSService {
         try {
             // Check if CID is valid
             if (!cid || cid === 'defaultCID' || cid === '') {
+                console.log('Invalid CID provided:', cid);
                 return {};
             }
+
             try {
                 const stream = this.ipfs.cat(cid);
                 let chunks = [];
@@ -37,9 +39,21 @@ class IPFSService {
                 
                 const encryptedData = Buffer.concat(chunks).toString();
                 const parsed = JSON.parse(encryptedData);
-        
 
-                return await encryptionService.decrypt(parsed.encryptedData, iv);
+                // Validate the parsed data structure
+                if (!parsed.encryptedData) {
+                    console.error('Invalid encrypted data structure:', parsed);
+                    return {};
+                }
+
+                // Use the provided IV if available, otherwise use the one from the encrypted data
+                const decryptionIV = iv || parsed.iv;
+                if (!decryptionIV) {
+                    console.error('No IV available for decryption');
+                    return {};
+                }
+
+                return await encryptionService.decrypt(parsed.encryptedData, decryptionIV);
             } catch (fetchError) {
                 console.error('IPFS data fetch error:', fetchError);
                 return {}; // Return empty object instead of throwing error

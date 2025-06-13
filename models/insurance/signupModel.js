@@ -71,5 +71,5 @@ const signupSchema = new Schema({
  }
 }, {timestamps: true}, { versionKey: false}
 );
-const Signup = mongoose.model("InsuranceSignup", signupSchema);
+const Signup = mongoose.model("Signup", signupSchema);
 module.exports = Signup;

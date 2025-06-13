@@ -6,7 +6,7 @@ const {authenticateToken} = require('../middleware/middleware');
 
 router.get('/getnotifications', authenticateToken, notificationController.getNotifications);
 
-router.get('/getallnotifications', authenticateToken, notificationController.getAllNotifications);
+// router.get('/getallnotifications', authenticateToken, notificationController.getAllNotifications);
 
 router.put('/markAsRead/:notificationId', authenticateToken, notificationController.markAsRead);
 
@@ -15,6 +15,8 @@ router.put('/markAllAsRead', authenticateToken, notificationController.markAllAs
 router.post('/createAppointmentNotification', authenticateToken, notificationController.createAppointmentNotification);
 router.post('/createMedicalHistory', authenticateToken, notificationController.createMedicalHistory);
 router.post('/createDoctorReview', authenticateToken, notificationController.createDoctorReview);
+
+// router.post('/insurance-request', authenticateToken, notificationController.handlerequestforinsurance);
 
 router.get('/getallnotifications', authenticateToken, notificationController.getAllNotifications);
 

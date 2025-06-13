@@ -237,6 +237,57 @@ const getAllNotifications = async (req, res) => {
     }
 };
 
+// Create notification for insurance access approval
+async function createInsuranceAccessNotification({ insuranceName, patientName }) {
+    console.log('[CONTROLLER] Creating insurance access notification:', {
+        insuranceName,
+        patientName
+    });
+
+    try {
+        const notification = await notificationModel.create({
+            recipientId: insuranceName,
+            recipientModel: 'Insurance',
+            title: 'Medical History Access Granted',
+            message: `You have been granted access to view ${patientName}'s medical history`,
+            read: false,
+            createdAt: new Date()
+        });
+        
+        console.log('[CONTROLLER] Insurance access notification created:', {
+            id: notification._id,
+            recipientId: notification.recipientId,
+            message: notification.message,
+            title: notification.title,
+            read: notification.read,
+            createdAt: notification.createdAt
+        });
+
+        // Trigger Pusher event on insurance-specific channel
+        const channelName = `notifications-insurance-${insuranceName}`;
+        console.log('[CONTROLLER] Triggering Pusher event on channel:', channelName);
+        
+        const pusherResponse = await pusher.trigger(channelName, 'new-notification', {
+            notification: notification
+        });
+        
+        console.log('[CONTROLLER] Pusher event triggered successfully:', {
+            channel: channelName,
+            response: pusherResponse
+        });
+
+        return notification;
+    } catch (error) {
+        console.error('[CONTROLLER] Error in createInsuranceAccessNotification:', {
+            error: error.message,
+            stack: error.stack,
+            code: error.code,
+            name: error.name
+        });
+        throw error;
+    }
+}
+
 module.exports = {
     // Get all notifications for logged in user
     getNotifications: async (req, res) => {
@@ -248,42 +299,61 @@ module.exports = {
                 });
             }
 
-            // Get doctor's name if user is a doctor
-            let recipientName = req.user.fullName;
-            if (req.user.role === 'doctor') {
-                const doctor = await adddoctorModel.findById(req.user.id);
-                if (doctor) {
-                    recipientName = doctor.fullName;
-                    console.log('[CONTROLLER] Found doctor:', {
-                        id: doctor._id,
-                        name: recipientName,
-                        email: doctor.email
-                    });
-                }
-            }
+            const user = req.user;
+            const userId = user.id;
+            const userRole = user.role;
 
-            if (!recipientName) {
+            let recipientModel;
+            let recipientId;
+
+            // Determine the recipient model and ID based on the user's role
+            if (userRole === 'patient') {
+                recipientModel = 'Patient';
+                recipientId = user.fullName || user.name;
+            } else if (userRole === 'doctor') {
+                recipientModel = 'Doctor';
+                recipientId = user.fullName || user.name;
+            } else if (userRole === 'admin') {
+                recipientModel = 'Admin';
+                recipientId = user.fullName || user.name;
+            } else if (userRole === 'insurance') {
+                recipientModel = 'Insurance';
+                recipientId = user.companyName || user.name;
+            } else {
                 return res.status(400).json({
                     success: false,
-                    message: 'User name not found'
+                    message: "Unknown user role"
                 });
             }
 
-            // Find notifications based on user role
-            let query = {
+            console.log('[CONTROLLER] Fetching notifications for:', {
+                recipientId: recipientId,
+                recipientModel: recipientModel,
+                userId: userId,
+                userRole: userRole
+            });
+
+            // Find notifications for this user
+            const notifications = await notificationModel.find({
                 $or: [
-                    { recipientId: recipientName, read: false },
-                    { recipientModel: 'Doctor', recipientId: recipientName, read: false }
+                    { recipientId: recipientId, recipientModel: recipientModel },
+                    { recipientId: userId, recipientModel: recipientModel }
                 ]
-            };
+            })
+            .sort({ createdAt: -1 }); // Sort by newest first
 
-            const notifications = await notificationModel.find(query)
-                .sort({ createdAt: -1 });
+            console.log('[CONTROLLER] Found notifications:', { 
+                count: notifications.length, 
+                notifications: notifications,
+                query: {
+                    recipientId: recipientId,
+                    recipientModel: recipientModel
+                }
+            });
 
-            // Log specific details about rating notifications
-            const ratingNotifications = notifications.filter(n => n.title === 'New Review Received');
-            const unreadCount = notifications.length;
-            res.json({
+            const unreadCount = notifications.filter(n => !n.read).length;
+
+            res.status(200).json({
                 success: true,
                 notifications,
                 unreadCount
@@ -481,5 +551,8 @@ module.exports = {
                 message: error.message 
             });
         }
-    }
+    },
+
+    // Create notification for insurance access approval
+    createInsuranceAccessNotification,
 };

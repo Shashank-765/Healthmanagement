@@ -12,6 +12,7 @@ const InsurancePatient = require('../../models/insurance/insurancePatientModel')
 const AddPatient = require('../../models/patient/addpatientModel');
 const MedicalHistory = require('../../models/medicalHistory/medicalHistoryModel');
 const IPFSService = require('../../services/ipfsService');
+const Notification = require('../../models/notification/notificationModel');
 
 module.exports = {
     insuranceSignup: async (req, res) => {
@@ -87,24 +88,54 @@ module.exports = {
     insuranceLogin: async (req, res) => {
         const { email, password } = req.body;
         try {
-            // Find user in Signup collection
-            const user = await Signup.findOne({ email });
-            if (!user) {
-                return res.status(401).json({ message: "Invalid email or password" });
-            }
+            console.log('Insurance login attempt:', { email });
 
             // Validate input
             if (!email || !password) {
-                return res.status(400).json({ message: "Email and password are required" });
+                console.log('Missing required fields');
+                return res.status(400).json({ 
+                    success: false,
+                    message: "Email and password are required" 
+                });
             }
 
+            // Find user in Signup collection
+            const user = await Signup.findOne({ email });
+            if (!user) {
+                console.log('User not found:', email);
+                return res.status(401).json({ 
+                    success: false,
+                    message: "Invalid email or password" 
+                });
+            }
+
+            console.log('User found:', { 
+                id: user._id,
+                email: user.email,
+                hasIpfsData: !!(user.ipfsCID && user.ipfsIV)
+            });
+
             // Get user data from IPFS
-            const ipfsData = await IPFSService.retrieveAndDecrypt(user.ipfsCID, user.ipfsIV);
+            let ipfsData;
+            try {
+                ipfsData = await IPFSService.retrieveAndDecrypt(user.ipfsCID, user.ipfsIV);
+                console.log('IPFS data retrieved successfully');
+            } catch (ipfsError) {
+                console.error('Error retrieving IPFS data:', ipfsError);
+                return res.status(500).json({ 
+                    success: false,
+                    message: "Error retrieving user data" 
+                });
+            }
             
             // Compare passwords
             const isMatch = await bcrypt.compare(password, ipfsData.password);
             if (!isMatch) {
-                return res.status(401).json({ message: "Invalid email or password" });
+                console.log('Password mismatch for user:', email);
+                return res.status(401).json({ 
+                    success: false,
+                    message: "Invalid email or password" 
+                });
             }
 
             // Generate JWT token with role
@@ -118,7 +149,9 @@ module.exports = {
                 { expiresIn: '24h' }
             );
 
-            // Create or update login record (only store email and token)
+            console.log('Token generated successfully');
+
+            // Create or update login record
             const loginData = {
                 email: user.email,
                 token: token,
@@ -132,14 +165,17 @@ module.exports = {
                 existingLogin.token = token;
                 existingLogin.loginTime = new Date();
                 await existingLogin.save();
+                console.log('Updated existing login record');
             } else {
                 // Create new login record
                 const newLogin = new Login(loginData);
                 await newLogin.save();
+                console.log('Created new login record');
             }
 
             // Send success response
             res.status(200).json({ 
+                success: true,
                 message: "Login successful", 
                 token, 
                 user: {
@@ -152,7 +188,10 @@ module.exports = {
             });
         } catch (error) {
             console.error('Login error:', error);
-            res.status(500).json({ message: "Server error: " + error.message });
+            res.status(500).json({ 
+                success: false,
+                message: "Server error: " + error.message 
+            });
         }
     },
     getPatientsWithMedicalHistory: async (req, res) => {
@@ -301,6 +340,18 @@ module.exports = {
             }
 
             await insurancePatient.save();
+
+            // Create notification for admin
+            const notification = new Notification({
+                recipientId: 'admin', // Since this is for all admins
+                recipientModel: 'Admin',
+                patientId: patient._id,
+                title: 'New Access Request',
+                message: `${req.user.name} (Insurance Company) has requested access to ${patient.fullName}'s medical history.`,
+                read: false
+            });
+
+            await notification.save();
 
             res.status(200).json({
                 success: true,

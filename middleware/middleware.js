@@ -9,14 +9,18 @@ const Signup = require('../models/insurance/signupModel');
 const authMiddleware = {
     authenticateToken: async (req, res, next) => {
         try {
+            let token = null;
+            
+            // Check Authorization header first
             const authHeader = req.headers.authorization;
-            let token;
-
-            if (authHeader) {
+            if (authHeader && authHeader.startsWith('Bearer ')) {
                 token = authHeader.split(' ')[1];
-              } else {
-               token = req.cookies?.token;
-              }
+            }
+            
+            // If no token in header, check cookies
+            if (!token && req.cookies) {
+                token = req.cookies.token;
+            }
 
             if (!token) {
                 console.error('No token found in request');
@@ -26,6 +30,13 @@ const authMiddleware = {
                     message: "No token provided"
                 });
             }
+
+            // Log token format for debugging
+            console.log('Token format:', {
+                length: token.length,
+                startsWith: token.substring(0, 10) + '...',
+                format: token.split('.').length === 3 ? 'valid' : 'invalid'
+            });
 
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -77,19 +88,26 @@ const authMiddleware = {
             req.user = {
                 id: user._id,
                 email: user.email,
-                // fullName: user.fullName,
                 role: decoded.role,
-                name: user.name || user.fullName,
+                name: user.name || user.fullName || user.email,
                 fullName: user.fullName
             };
 
             next();
         } catch (error) {
             console.error('Detailed middleware error:', error);
+            // Add more specific error messages based on the error type
+            let errorMessage = "Invalid token";
+            if (error.name === 'JsonWebTokenError') {
+                errorMessage = "Invalid token format";
+            } else if (error.name === 'TokenExpiredError') {
+                errorMessage = "Token has expired";
+            }
+            
             return res.status(401).json({
                 statusCode: 401,
                 success: false,
-                message: error.message || "Invalid token"
+                message: errorMessage
             });
         }
     }

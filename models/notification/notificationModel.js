@@ -9,7 +9,7 @@ const notificationSchema = new mongoose.Schema({
   recipientModel: {
     type: String,
     required: true,
-    enum: ['Doctor', 'Patient', 'Admin', 'Insurance'] 
+    enum: ['Doctor', 'Patient', 'Admin', 'Insurance', 'Signup'] 
   },
   patientId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -42,4 +42,5 @@ const notificationSchema = new mongoose.Schema({
 notificationSchema.index({ recipientId: 1, read: 1 });
 notificationSchema.index({ recipientModel: 1, recipientId: 1, read: 1 });
 
-module.exports = mongoose.model('Notification', notificationSchema);
+const Notification = mongoose.model('Notification', notificationSchema);
+module.exports = Notification;
